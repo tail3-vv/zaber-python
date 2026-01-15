@@ -4,8 +4,14 @@ class ZaberCLI():
     def __init__(self):
         self.connection = None
         self.axis = None
-
-    def connect(self, comport="COM5"):
+    
+    def get_connection(self):
+        if(self.connection != None):
+            return self.connection
+        else:
+            print("Not connected!") # TODO: make error class (throw exception)
+    
+    def connect(self, comport="COM3"):
         try:
             self.connection = Connection.open_serial_port(comport)
             device_list = self.connection.detect_devices()

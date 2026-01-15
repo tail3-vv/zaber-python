@@ -1,0 +1,839 @@
+<?xml version="1.0"?>
+<doc>
+    <assembly>
+        <name>FUTEK.Devices</name>
+    </assembly>
+    <members>
+        <member name="T:FUTEK.Devices.Conversion">
+            <summary>
+            Conversion class handles the ADC conversions for FUTEK Devices.
+            </summary>
+        </member>
+        <member name="P:FUTEK.Devices.DeviceQIA128.UseLinearization">
+            <summary>
+            Tells the device to usr linearization when converting ADC values to engineering units.
+            </summary>
+        </member>
+        <member name="T:FUTEK.Devices.DeviceUSB225ProfileCalibrationModel">
+            <summary>
+            Profile calibration class for USB225 device.
+            </summary>
+        </member>
+        <member name="T:FUTEK.Devices.DeviceCountDetectedEventArgs">
+            <summary>
+            EventArg exention for DeviceDetectionStateUpdate event.
+            </summary>
+        </member>
+        <member name="T:FUTEK.Devices.StreamDataPoint">
+            <summary>
+            Stream data point class.
+            </summary>
+        </member>
+        <member name="T:FUTEK.Devices.Device">
+            <summary>
+            Base class for all FUTEK device operations.
+            </summary>
+        </member>
+        <member name="E:FUTEK.Devices.Device.PropertyChanged">
+            <summary>
+            PropertyChanged event fires when any property Device property has been changed.
+            </summary>
+        </member>
+        <member name="P:FUTEK.Devices.Device.ProfileCalibrationModels">
+            <summary>
+            Profile Calibration Models for device.
+            </summary>
+        </member>
+        <member name="E:FUTEK.Devices.Device.DeviceHasBeenDisconnected">
+            <summary>
+            Event fires when a device has been disconnected.
+            </summary>
+        </member>
+        <member name="P:FUTEK.Devices.Device.SystemIndex">
+            <summary>
+            Index of device in repository.
+            </summary>
+        </member>
+        <member name="M:FUTEK.Devices.Device.GetChannelXNormalDataRequest(System.Int32)">
+            <summary>
+            Gets ADC reading for a channel.
+            </summary>
+             <returns>
+              ADC reading from channel
+             </returns>
+        </member>
+        <member name="M:FUTEK.Devices.Device.GetChannelXNumberOfDirections(System.Int32)">
+            <summary>
+            Gets number of calibration directions for a channel.
+            </summary>
+             <returns>
+              Number of calibration directions for channel
+             </returns>
+        </member>
+        <member name="M:FUTEK.Devices.Device.SetChannelXNumberOfDirections(System.Int32,System.Int32)">
+            <summary>
+            Sets number of directions for a channel.
+            </summary>
+        </member>
+        <member name="M:FUTEK.Devices.Device.GetChannelXSensorSerialNumber(System.Int32)">
+            <summary>
+            Gets sensor serial number for a channel.
+            </summary>
+             <returns>
+              Sensor serial number for channel.
+             </returns>
+        </member>
+        <member name="M:FUTEK.Devices.Device.SetChannelXSensorSerialNumber(System.Int32,System.UInt32)">
+            <summary>
+            Sets sensor serial number for a channel.
+            </summary>
+        </member>
+        <member name="M:FUTEK.Devices.Device.GetInstrumentSerialNumber">
+            <summary>
+            Gets serial number for device.
+            </summary>
+             <returns>
+             Device serial number.
+             </returns>
+        </member>
+        <member name="M:FUTEK.Devices.Device.SetInstrumentSerialNumber(System.String)">
+            <summary>
+            Sets serial number for device.
+            </summary>
+        </member>
+        <member name="M:FUTEK.Devices.Device.GetHardwareVersion">
+            <summary>
+            Gets hardware version of device.
+            </summary>
+             <returns>
+             Hardware version
+             </returns>
+        </member>
+        <member name="M:FUTEK.Devices.Device.GetFirmwareVersion">
+            <summary>
+            Gets firmware version of device.
+            </summary>
+             <returns>
+             Firmware version
+             </returns>
+        </member>
+        <member name="M:FUTEK.Devices.Device.GetFirmwareYear">
+            <summary>
+            Gets firmware year of device.
+            </summary>
+             <returns>
+             Firmware year
+             </returns>
+        </member>
+        <member name="M:FUTEK.Devices.Device.GetFirmwareMonth">
+            <summary>
+            Gets firmware month of device.
+            </summary>
+             <returns>
+             Firmware month
+             </returns>
+        </member>
+        <member name="E:FUTEK.Devices.Device.ProfileAssignedToChannelChanged">
+            <summary>
+            Event fires when a channel has been assigned a new profile.
+            </summary>
+        </member>
+        <member name="M:FUTEK.Devices.Device.GetDeviceChannelSelectedProfile(System.Int32)">
+            <summary>
+            Gets the profile assigned to channel.
+            </summary>
+             <returns>
+             Profile currently assinged to channel.
+             </returns>
+        </member>
+        <member name="M:FUTEK.Devices.Device.SetDeviceChannelSelectedProfileNumber(System.Int32,System.Int32)">
+            <summary>
+            Sets the profile number for a channel.
+            </summary>
+        </member>
+        <member name="M:FUTEK.Devices.Device.GetMaximumNumberOfChannels">
+            <summary>
+            Gets the maximum number of channels for the device.
+            </summary>
+             <returns>
+            Maximum number of channels.
+             </returns>
+        </member>
+        <member name="M:FUTEK.Devices.Device.GetMaximumNumberOfProfiles">
+            <summary>
+            Gets the maximum number of profiles for the device.
+            </summary>
+             <returns>
+            Maximum number of profiles.
+             </returns>
+        </member>
+        <member name="M:FUTEK.Devices.Device.GetAvailableProfilesForChannel(System.Int32)">
+            <summary>
+            Gets the profiles that can be assinged to a particular channel number.
+            </summary>
+             <returns>
+            Profiles that can be assinged to channel number.
+             </returns>
+        </member>
+        <member name="M:FUTEK.Devices.Device.GetModelNumber">
+            <summary>
+            Gets the model number of the device.
+            </summary>
+             <returns>
+            Device model number.
+             </returns>
+        </member>
+        <member name="T:FUTEK.Devices.DeviceRepository">
+            <summary>
+             Provides access to FUTEK Devices and their operations
+            </summary>
+        </member>
+        <member name="E:FUTEK.Devices.DeviceRepository.DeviceCountDetected">
+            <summary>
+             Informs when available number of available FUTEK devices has been detected.
+            </summary>
+            <seealso cref="T:FUTEK.Devices.DeviceCountDetectedEventArgs"/>
+        </member>
+        <member name="M:FUTEK.Devices.DeviceRepository.#ctor">
+            <summary>
+             Initializes DeviceRepository instance.
+            </summary>
+        </member>
+        <member name="M:FUTEK.Devices.DeviceRepository.DisconnectDevice(System.String,System.String)">
+            <summary>
+             Disconnects device from port.
+            </summary>
+            <remarks>
+            DeviceRepository object will disconnect device from library freeing up the port the device was using.
+            </remarks>
+        </member>
+        <member name="E:FUTEK.Devices.DeviceRepository.DeviceDiscovered">
+            <summary>
+             Event fires when a device is discovered.
+            </summary>
+        </member>
+        <member name="P:FUTEK.Devices.DeviceRepository.DeviceCount">
+            <summary>
+             Returns the number of devices currently connected.
+            </summary>
+        </member>
+        <member name="P:FUTEK.Devices.DeviceRepository.Devices">
+            <summary>
+             Returns an enumerable of devices currently connected.
+            </summary>
+        </member>
+        <member name="M:FUTEK.Devices.DeviceRepository.DetectDevicesAsync">
+            <summary>
+             Initializes all available FUTEK devices.
+            </summary>
+            <returns>
+            IList containing connected devices.
+            </returns>
+        </member>
+        <member name="M:FUTEK.Devices.DeviceRepository.DetectDevices">
+            <summary>
+             Initializes all available FUTEK devices.
+            </summary>
+            <returns>
+            IList containing connected devices.
+            </returns>
+        </member>
+        <member name="E:FUTEK.Devices.DeviceQIA123.SamplingRateChanged">
+            <summary>
+            SamplingRateChanged event fires when the sampling rate has been changed.
+            </summary>
+        </member>
+        <member name="P:FUTEK.Devices.DeviceQIA123.UseLinearization">
+            <summary>
+            Tells the device to use linearization when converting ADC values to engineering units.
+            </summary>
+        </member>
+        <member name="M:FUTEK.Devices.DeviceQIA123.GetProfileXLoadingPoint(System.Int32,System.Int32,FUTEK.Devices.CalibrationDirections)">
+            <summary>
+            Gets loading point of a profile.
+            </summary>
+             <returns>
+             Loading Point
+             </returns>
+        </member>
+        <member name="M:FUTEK.Devices.DeviceQIA123.GetProfileXNumberOfLoadingPoints(System.Int32)">
+            <summary>
+            Gets number of loading points for profile.
+            </summary>
+             <returns>
+             Number of loading points
+             </returns>
+        </member>
+        <member name="M:FUTEK.Devices.DeviceQIA123.SetProfileXNumberOfLoadingPoints(System.Int32,System.Int32)">
+            <summary>
+            Set number of loading point for profile.
+            </summary>
+        </member>
+        <member name="M:FUTEK.Devices.DeviceQIA123.GetProfileXAllLoadingPointsForDirection(System.Int32,FUTEK.Devices.CalibrationDirections)">
+            <summary>
+            Gets all calibration loading points for a profile number.
+            </summary>
+             <returns>
+              IEnumarable of loading points for calibration direction.
+             </returns>
+        </member>
+        <member name="M:FUTEK.Devices.DeviceQIA123.SetProfileXLoadingPoint(System.Int32,FUTEK.Devices.LoadingPoint)">
+            <summary>
+            Set loading point for profile.
+            </summary>
+        </member>
+        <member name="M:FUTEK.Devices.DeviceQIA123.SetProfileXUnitOfMeasure(System.Int32,FUTEK.Devices.UnitsOfMeasure)">
+            <summary>
+            Set unit of measure for profile.
+            </summary>
+        </member>
+        <member name="M:FUTEK.Devices.DeviceQIA123.GetProfileXUnitOfMeasure(System.Int32)">
+            <summary>
+            Gets unit of measure for channel.
+            </summary>
+             <returns>
+             Unit of measure
+             </returns>
+        </member>
+        <member name="M:FUTEK.Devices.DeviceQIA123.GetChannelXReading(System.Int32)">
+            <summary>
+            Gets the reading for a channel number.
+            </summary>
+             <returns>
+             Reading for channel.
+             </returns>
+        </member>
+        <member name="M:FUTEK.Devices.DeviceQIA123.GetChannelXSamplingRatePossibleValues(System.Int32)">
+            <summary>
+            Gets possible sampling rate values that can be set for a channel.
+            </summary>
+             <returns>
+             List of sampling rates.
+             </returns>
+        </member>
+        <member name="M:FUTEK.Devices.DeviceQIA123.SetProfileXSamplingRate(System.Int32,System.String)">
+            <summary>
+            Set sampling rate for profile.
+            </summary>
+        </member>
+        <member name="M:FUTEK.Devices.DeviceQIA123.GetProfileXSamplingRate(System.Int32)">
+            <summary>
+            Gets sampling rate for profile.
+            </summary>
+             <returns>
+             Sampling rate.
+             </returns>
+        </member>
+        <member name="M:FUTEK.Devices.DeviceQIA123.GetAvailableProfilesForChannel(System.Int32)">
+            <summary>
+            Gets all profiles that can be assinged to channel.
+            </summary>
+             <returns>
+              IEnumarable of assignable profiles.
+             </returns>
+        </member>
+        <member name="M:FUTEK.Devices.DeviceQIA123.GetChannelXLoadingPoint(System.Int32,System.Int32,FUTEK.Devices.CalibrationDirections)">
+            <summary>
+            Gets loading point of channel.
+            </summary>
+             <returns>
+              Loading point 
+             </returns>
+        </member>
+        <member name="M:FUTEK.Devices.DeviceQIA123.SetChannelXSamplingRate(System.Int32,System.String)">
+            <summary>
+            Set sampling rate for a channel.
+            </summary>
+        </member>
+        <member name="M:FUTEK.Devices.DeviceQIA123.GetChannelXSamplingRate(System.Int32)">
+            <summary>
+            Gets sampling rate of channel number.
+            </summary>
+             <returns>
+              Sampling rate
+             </returns>
+        </member>
+        <member name="M:FUTEK.Devices.DeviceQIA123.SetChannelXUnitOfMeasure(System.Int32,FUTEK.Devices.UnitsOfMeasure)">
+            <summary>
+            Set unit of measure for channel.
+            </summary>
+        </member>
+        <member name="M:FUTEK.Devices.DeviceQIA123.GetChannelXUnitOfMeasure(System.Int32)">
+            <summary>
+            Gets unit of measure for channel.
+            </summary>
+             <returns>
+             Unit of measure
+             </returns>
+        </member>
+        <member name="M:FUTEK.Devices.DeviceQIA123.GetChannelXAllLoadingPointsForDirection(System.Int32,FUTEK.Devices.CalibrationDirections)">
+            <summary>
+            Gets all calibration loading points for channel.
+            </summary>
+             <returns>
+             Enumerable of loading points
+             </returns>
+        </member>
+        <member name="M:FUTEK.Devices.DeviceQIA123.GetChannelXNumberOfLoadingPoints(System.Int32)">
+            <summary>
+            Gets number of loading points for channel.
+            </summary>
+             <returns>
+             Number of loading points
+             </returns>
+        </member>
+        <member name="M:FUTEK.Devices.DeviceQIA123.SetChannelXNumberLoadingPoints(System.Int32,System.Int32)">
+            <summary>
+            Set number of loading points for channel.
+            </summary>
+        </member>
+        <member name="M:FUTEK.Devices.DeviceQIA123.SetChannelXLoadingPoint(System.Int32,FUTEK.Devices.LoadingPoint)">
+            <summary>
+            Set loading point for channel.
+            </summary>
+        </member>
+        <member name="M:FUTEK.Devices.DeviceQIA123.GetChannelXDirectionXType(System.Int32,FUTEK.Devices.CalibrationDirections)">
+            <summary>
+            Gets direction type for channel.
+            </summary>
+             <returns>
+            Channel direction type
+             </returns>
+        </member>
+        <member name="M:FUTEK.Devices.DeviceQIA123.SetChannelXScaleFactor(System.Int32,System.Double)">
+            <summary>
+            Sets scale factor for a channel
+            </summary>
+        </member>
+        <member name="M:FUTEK.Devices.DeviceQIA123.SetChannelXOffset(System.Int32,System.Double)">
+            <summary>
+            Sets offset for a channel
+            </summary>
+        </member>
+        <member name="M:FUTEK.Devices.DeviceQIA123.PreStreamingOperations(System.Object[])">
+            <summary>
+            Runs operations that need to be executed before stream data can be collected.
+            </summary>
+        </member>
+        <member name="M:FUTEK.Devices.DeviceQIA123.GetStreamingData(System.Object[])">
+            <summary>
+            Gets raw streaming data.
+            </summary>
+             <returns>
+            object containing stream data.
+             </returns>
+        </member>
+        <member name="M:FUTEK.Devices.DeviceQIA123.GetStreamingDataConverted(System.Object[])">
+            <summary>
+            Returns converted streaming data
+            </summary>
+             <returns>
+            Array of stream data points
+             </returns>
+        </member>
+        <member name="M:FUTEK.Devices.DeviceQIA123.PostStreamingOperations(System.Object[])">
+            <summary>
+            Gets the stream data converter.  This is used to convert a file containing raw data to a file with converted readings.
+            </summary>
+             <returns>
+            Stream data converter.
+             </returns>
+        </member>
+        <member name="M:FUTEK.Devices.DeviceQIA123.GetStreamDataConverter(System.String,System.String)">
+            <summary>
+            Gets the stream data converter.  This is used to convert a file containing raw data to a file with converted readings.
+            </summary>
+             <returns>
+            Stream data converter.
+             </returns>
+        </member>
+        <member name="M:FUTEK.Devices.DeviceQIA123.PostStreamingOperations(System.Byte[]@)">
+            <summary>
+            Runs the operations after streaming is complete.  Retreives any remaining stream data and points reamingStreamData parameter to it.
+            </summary>
+        </member>
+        <member name="T:FUTEK.Devices.DeviceUSB225">
+            <summary>
+            USB225 class
+            </summary>
+        </member>
+        <member name="E:FUTEK.Devices.DeviceUSB225.SamplingRateChanged">
+            <summary>
+            SamplingRateChanged event fires when the sampling rate has been changed.
+            </summary>
+        </member>
+        <member name="P:FUTEK.Devices.DeviceUSB225.UseLinearization">
+            <summary>
+            Tells the device to usr linearization when converting ADC values to engineering units.
+            </summary>
+        </member>
+        <member name="M:FUTEK.Devices.DeviceUSB225.GetProfileXAllLoadingPointsForDirection(System.Int32,FUTEK.Devices.CalibrationDirections)">
+            <summary>
+            Gets all calibration loading points for a profile number.
+            </summary>
+             <returns>
+              IEnumarable of loading points for calibration direction.
+             </returns>
+        </member>
+        <member name="M:FUTEK.Devices.DeviceUSB225.GetAvailableProfilesForChannel(System.Int32)">
+            <summary>
+            Gets all profiles that can be assinged to channel.
+            </summary>
+             <returns>
+              IEnumarable of assignable profiles.
+             </returns>
+        </member>
+        <member name="M:FUTEK.Devices.DeviceUSB225.GetChannelXLoadingPoint(System.Int32,System.Int32,FUTEK.Devices.CalibrationDirections)">
+            <summary>
+            Gets loading point of channel.
+            </summary>
+             <returns>
+              Loading point 
+             </returns>
+        </member>
+        <member name="M:FUTEK.Devices.DeviceUSB225.GetChannelXSamplingRate(System.Int32)">
+            <summary>
+            Gets sampling rate of channel number.
+            </summary>
+             <returns>
+              Sampling rate
+             </returns>
+        </member>
+        <member name="M:FUTEK.Devices.DeviceUSB225.GetProfileXLoadingPoint(System.Int32,System.Int32,FUTEK.Devices.CalibrationDirections)">
+            <summary>
+            Gets loading point of a profile.
+            </summary>
+             <returns>
+             Loading Point
+             </returns>
+        </member>
+        <member name="M:FUTEK.Devices.DeviceUSB225.GetProfileXNumberOfLoadingPoints(System.Int32)">
+            <summary>
+            Gets number of loading points for profile.
+            </summary>
+             <returns>
+             Number of loading points
+             </returns>
+        </member>
+        <member name="M:FUTEK.Devices.DeviceUSB225.GetProfileXSamplingRate(System.Int32)">
+            <summary>
+            Gets sampling rate for profile.
+            </summary>
+             <returns>
+             Sampling rate.
+             </returns>
+        </member>
+        <member name="M:FUTEK.Devices.DeviceUSB225.GetProfileXUnitOfMeasure(System.Int32)">
+            <summary>
+            Gets unit of measure for profile.
+            </summary>
+             <returns>
+             Unit of measure.
+             </returns>
+        </member>
+        <member name="M:FUTEK.Devices.DeviceUSB225.GetRTDConversion(System.Double,System.Double)">
+            <summary>
+            Gets the reading for a channel number.
+            </summary>
+             <returns>
+             Reading for channel.
+             </returns>
+             
+        </member>
+        <member name="M:FUTEK.Devices.DeviceUSB225.GetChannelXSamplingRatePossibleValues(System.Int32)">
+            <summary>
+            Gets possible sampling rate values that can be set for a channel.
+            </summary>
+             <returns>
+             List of sampling rates.
+             </returns>
+        </member>
+        <member name="M:FUTEK.Devices.DeviceUSB225.SetChannelXSamplingRate(System.Int32,System.String)">
+            <summary>
+            Set sampling rate for a channel.
+            </summary>
+        </member>
+        <member name="M:FUTEK.Devices.DeviceUSB225.SetProfileXLoadingPoint(System.Int32,FUTEK.Devices.LoadingPoint)">
+            <summary>
+            Set loading point for profile.
+            </summary>
+        </member>
+        <member name="M:FUTEK.Devices.DeviceUSB225.PostStreamingOperations(System.Byte[]@)">
+            <summary>
+            Runs the operations after streaming is complete.  Retreives any remaining stream data and points reamingStreamData parameter to it.
+            </summary>
+        </member>
+        <member name="M:FUTEK.Devices.DeviceUSB225.SetProfileXNumberOfLoadingPoints(System.Int32,System.Int32)">
+            <summary>
+            Set number of loading point for profile.
+            </summary>
+        </member>
+        <member name="M:FUTEK.Devices.DeviceUSB225.SetProfileXSamplingRate(System.Int32,System.String)">
+            <summary>
+            Set sampling rate for profile.
+            </summary>
+        </member>
+        <member name="M:FUTEK.Devices.DeviceUSB225.SetProfileXUnitOfMeasure(System.Int32,FUTEK.Devices.UnitsOfMeasure)">
+            <summary>
+            Set unit of measure for profile.
+            </summary>
+        </member>
+        <member name="M:FUTEK.Devices.DeviceUSB225.SetChannelXUnitOfMeasure(System.Int32,FUTEK.Devices.UnitsOfMeasure)">
+            <summary>
+            Set unit of measure for channel.
+            </summary>
+        </member>
+        <member name="M:FUTEK.Devices.DeviceUSB225.GetChannelXUnitOfMeasure(System.Int32)">
+            <summary>
+            Gets unit of measure for channel.
+            </summary>
+             <returns>
+             Unit of measure
+             </returns>
+        </member>
+        <member name="M:FUTEK.Devices.DeviceUSB225.GetChannelXAllLoadingPointsForDirection(System.Int32,FUTEK.Devices.CalibrationDirections)">
+            <summary>
+            Gets all calibration loading points for channel.
+            </summary>
+             <returns>
+             Enumerable of loading points
+             </returns>
+        </member>
+        <member name="M:FUTEK.Devices.DeviceUSB225.GetChannelXNumberOfLoadingPoints(System.Int32)">
+            <summary>
+            Gets number of loading points for channel.
+            </summary>
+             <returns>
+             Number of loading points
+             </returns>
+        </member>
+        <member name="M:FUTEK.Devices.DeviceUSB225.SetChannelXNumberLoadingPoints(System.Int32,System.Int32)">
+            <summary>
+            Set number of loading points for channel.
+            </summary>
+        </member>
+        <member name="M:FUTEK.Devices.DeviceUSB225.SetChannelXLoadingPoint(System.Int32,FUTEK.Devices.LoadingPoint)">
+            <summary>
+            Set loading point for channel.
+            </summary>
+        </member>
+        <member name="M:FUTEK.Devices.DeviceUSB225.GetChannelXDirectionXType(System.Int32,FUTEK.Devices.CalibrationDirections)">
+            <summary>
+            Gets direction type for channel.
+            </summary>
+             <returns>
+            Channel direction type
+             </returns>
+        </member>
+        <member name="M:FUTEK.Devices.DeviceUSB225.PreStreamingOperations(System.Object[])">
+            <summary>
+            Runs operations that need to be executed before stream data can be collected.
+            </summary>
+        </member>
+        <member name="M:FUTEK.Devices.DeviceUSB225.GetStreamingDataConverted(System.Object[])">
+            <summary>
+            Returns converted streaming data
+            </summary>
+             <returns>
+            Array of stream data points
+             </returns>
+        </member>
+        <member name="M:FUTEK.Devices.DeviceUSB225.GetStreamingData(System.Object[])">
+            <summary>
+            Gets raw streaming data.
+            </summary>
+             <returns>
+            object containing stream data.
+             </returns>
+        </member>
+        <member name="M:FUTEK.Devices.DeviceUSB225.PostStreamingOperations(System.Object[])">
+            <summary>
+            Gets the stream data converter.  This is used to convert a file containing raw data to a file with converted readings.
+            </summary>
+             <returns>
+            Stream data converter.
+             </returns>
+        </member>
+        <member name="M:FUTEK.Devices.DeviceUSB225.GetStreamDataConverter(System.String,System.String)">
+            <summary>
+            Gets the stream data converter.  This is used to convert a file containing raw data to a file with converted readings.
+            </summary>
+             <returns>
+            Stream data converter.
+             </returns>
+        </member>
+        <member name="M:FUTEK.Devices.DeviceUSB225.GetStreamDataConverter">
+            <summary>
+            Gets the stream data converter.  This is used to convert raw stream data into readings.
+            </summary>
+             <returns>
+            Stream data converter.
+             </returns>
+        </member>
+        <member name="M:FUTEK.Devices.DeviceUSB225.GetDeviceTemperature">
+            <summary>
+            Gets temperature of device.
+            </summary>
+             <returns>
+            Device temperature
+             </returns>
+        </member>
+        <member name="M:FUTEK.Devices.DeviceUSB225.SetChannelXScaleFactor(System.Int32,System.Double)">
+            <summary>
+            Sets scale factor for a channel
+            </summary>
+        </member>
+        <member name="M:FUTEK.Devices.DeviceUSB225.SetChannelXOffset(System.Int32,System.Double)">
+            <summary>
+            Sets offset for a channel
+            </summary>
+        </member>
+        <member name="M:FUTEK.Devices.DeviceUSB225.GetTEDSTemplate">
+            <summary>
+            Gets the TEDS template currently being used.
+            </summary>
+             <returns>
+              Integer representing TEDS template.
+             </returns>
+        </member>
+        <member name="M:FUTEK.Devices.DeviceUSB225.GetTEDSData(System.Byte,System.Byte)">
+            <summary>
+            Gets the set of TEDS data between the givven high address and low address.
+            </summary>
+             <returns>
+             Byte array of TEDS data.
+             </returns>
+        </member>
+        <member name="M:FUTEK.Devices.DeviceUSB225.SetTEDSData(System.Byte,System.Byte,System.Byte[])">
+            <summary>
+            Sets data for given page number and block number of TEDS Data.
+            </summary>
+        </member>
+        <member name="M:FUTEK.Devices.DeviceUSB225.SetAllTEDSData">
+            <summary>
+            This method is to be called after all desired TEDS data has been set.  This will take TEDS data stored from set and write it all to EEPROM.
+            </summary>
+        </member>
+        <member name="M:FUTEK.Devices.DeviceUSB225.GetAutoTEDS">
+            <summary>
+            Indicates if Auto TEDS is enabled.  Auto TEDS tells the board to use TEDS data when set to true; otherwise use EEPROM data.
+            </summary>
+             <returns>
+             true if enabled; otherwise false.
+             </returns>
+        </member>
+        <member name="M:FUTEK.Devices.DeviceUSB225.SetAutoTEDS(System.Boolean)">
+            <summary>
+            Sets state of Auto TEDS. Auto TEDS tells the board to use TEDS data when set to true; otherwise use EEPROM data.
+            </summary>
+        </member>
+        <member name="T:FUTEK.Devices.Gen1DeviceBase">
+            <summary>
+            Base class for generation 1 device operations.
+            </summary>
+        </member>
+        <member name="T:FUTEK.Devices.Gen1DeviceProfileCalibrationModel">
+            <summary>
+            Base class for generation 1 device profile calibration.
+            </summary>
+        </member>
+        <member name="T:FUTEK.Devices.ProfileCalibrationModel">
+            <summary>
+            Base class for device profile calibration.
+            </summary>
+        </member>
+        <member name="T:FUTEK.Devices.ProfileAssignedToChannelChangedEventArgs">
+            <summary>
+            EventArg extension for ProfileAssignedToChannelChanged event.
+            </summary>
+        </member>
+        <member name="T:FUTEK.Devices.DigitalCalibrationLoadingPointSet">
+            <summary>
+            Container class for digital calibration loading points.
+            </summary>
+        </member>
+        <member name="T:FUTEK.Devices.LoadingPoint">
+            <summary>
+            Digital calibration loading point.
+            </summary>
+        </member>
+        <member name="T:FUTEK.Devices.Gen1BaseStreamDataConverter">
+            <summary>
+            Base class for generation 1 devices stream data conversion.
+            </summary>
+        </member>
+        <member name="T:FUTEK.Devices.SingleADCStreamDataConverter">
+            <summary>
+            Stream data converter for single ADC devices.
+            </summary>
+        </member>
+        <member name="T:FUTEK.Devices.StreamDataConverter">
+            <summary>
+            Base class for stream data conversion.
+            </summary>
+        </member>
+        <member name="T:FUTEK.LookUpTables.DeviceUSB225ProEliteSamplingRateLUT">
+            <summary>
+            Look up table for USB225 Pro Elite sampling rates.
+            </summary>
+               <list type = "bullet|number|table">
+               <listheader> 
+                   <term> term </term>
+                   <description> description </description>
+               </listheader>
+               <item>
+                   <term> Assembly </term>
+                   <description> The library or executable built from a compilation.</description>
+               </item>
+               </list>
+        </member>
+        <member name="T:FUTEK.LookUpTables.DeviceUSB225StandardSamplingRateLUT">
+            <summary>
+            Look up table for USB225 sampling rates.
+            </summary>
+               <list type = "bullet|number|table">
+               <listheader> 
+                   <term> term </term>
+                   <description> description </description>
+               </listheader>
+               <item>
+                   <term> Assembly </term>
+                   <description> The library or executable built from a compilation.</description>
+               </item>
+               </list>
+        </member>
+        <member name="T:FUTEK.LookUpTables.DeviceUSB225ShuntLUT">
+            <summary>
+            Look up table for USB225 shunt options.
+            </summary>
+               <list type = "bullet|number|table">
+               <listheader> 
+                   <term> term </term>
+                   <description> description </description>
+               </listheader>
+               <item>
+                   <term> Assembly </term>
+                   <description> The library or executable built from a compilation.</description>
+               </item>
+               </list>
+        </member>
+        <member name="M:FUTEK.DeviceCommunication.Gen0IHHDeviceCommunicationInterface.SetCalibrationRegister(System.Int32,System.Byte,System.Byte,System.Byte)">
+            FUTEKUSBDLLDeviceCommunicationInterface_IHH Get Commands *
+            End FUTEKUSBDLLDeviceCommunicationInterface_IHH Get Commands *
+            FUTEKUSBDLLDeviceCommunicationInterface_IHH Set Commands *
+        </member>
+        <member name="M:FUTEK.DeviceCommunication.Gen0IHHDeviceCommunicationInterface.ClosePort">
+            End FUTEKUSBDLLDeviceCommunicationInterface_IHH Set Commands *
+        </member>
+        <member name="F:FUTEK.DeviceCommunication.Gen0USBDeviceCommunicationInterface.commandExecutionService">
+            Gen0USBDeviceCommunicationInterface Get Commands *
+        </member>
+        <member name="M:FUTEK.DeviceCommunication.Gen0USBDeviceCommunicationInterface.SetUnitCode(System.Byte,System.Int32)">
+            End Gen0USBDeviceCommunicationInterface Get Commands *
+            Gen0USBDeviceCommunicationInterface Set Commands - Start *
+        </member>
+        <member name="M:FUTEK.DeviceCommunication.Gen0USBDeviceCommunicationInterface.GetInstrumentSerialNumber">
+            Gen0USBDeviceCommunicationInterface Set Commands - End *
+        </member>
+    </members>
+</doc>
