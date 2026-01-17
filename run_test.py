@@ -13,4 +13,5 @@ upper_limit = 20
 num_cycle = input("How many cycles")
 
 # Zaber setup
-connection = Connection.openSerialPort()
+zaber = ZaberCLI()
+connection = zaber.connect(comport="COM6")
