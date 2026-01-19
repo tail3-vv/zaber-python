@@ -6,32 +6,10 @@ from FUTEK.Devices import DeviceRepository
 
 class FUTEKDeviceCLI:
     def __init__(self):
-        try:
-            self.oFUTEKDeviceRepoDLL = FUTEK.Devices.DeviceRepository()
-            print("FUTEK Devices DLL initialized.")
-        except Exception as e:
-            print(f"Error initializing FUTEK Devices DLL: {e}")
-            return
-
-        self.SerialNumber = ""
-        self.ModelNumber = ""
-        self.UnitCode = 0
-        self.NormalData = 0
-        self.OpenedConnection = False
-
+        self.oFUTEKDeviceRepoDLL = self.connect()
         # Initialize and check for connected FUTEK devices (particularly USB225)
         devices = self.oFUTEKDeviceRepoDLL.DetectDevices()
         self.USB225 = devices[0] if devices else None
-
-        if self.oFUTEKDeviceRepoDLL.DeviceCount > 0:
-            print("Device connected.")
-        else:
-            print("No device connected.")
-            return
-
-    def start(self):
-        if self.OpenedConnection:
-            pass
 
         self.ModelNumber = FUTEK.Devices.Device.GetModelNumber(self.USB225)
         print(f"Model Number: {self.ModelNumber}")
@@ -46,6 +24,14 @@ class FUTEKDeviceCLI:
 
         self.NormalData = FUTEK.Devices.DeviceUSB225.GetChannelXReading(self.USB225, 0)
         print(f"Sensor Reading: {self.NormalData:.3f}")
+
+    def connect(self):
+        try:
+            print("FUTEK Devices DLL initialized.")
+            return FUTEK.Devices.DeviceRepository()
+        except Exception as e:
+            print(f"Error initializing FUTEK Devices DLL: {e}")
+            return
 
     def stop(self):
         if not self.OpenedConnection:
@@ -75,7 +61,7 @@ if __name__ == '__main__':
     while True:
         command = input("Enter command (start/stop/exit): ").strip().lower()
         if command == 'start':
-            cli.start()
+            print("started")
         elif command == 'stop':
             cli.stop()
         elif command == 'exit':

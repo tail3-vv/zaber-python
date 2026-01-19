@@ -9,7 +9,7 @@ USB connection name (ie COM3, COM4, COM5) is varies by laptop
 Check device manager -> Ports (COM & LPT) to see which connection works
 """
 cli = ZaberCLI()
-connection = cli.connect(comport="COM6")
+connection = cli.connect(comport="COM4")
 
 # look for usb devices that are connected
 device_list = connection.detect_devices()
