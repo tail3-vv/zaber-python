@@ -22,9 +22,13 @@ class FUTEKDeviceCLI:
 
         self.OpenedConnection = True
 
+        # There may be no use for this variable to exist
         self.NormalData = FUTEK.Devices.DeviceUSB225.GetChannelXReading(self.USB225, 0)
         print(f"Sensor Reading: {self.NormalData:.3f}")
 
+    def getNormalData(self):
+        return FUTEK.Devices.DeviceUSB225.GetChannelXReading(self.USB225, 0)
+    
     def connect(self):
         try:
             print("FUTEK Devices DLL initialized.")
@@ -61,7 +65,7 @@ if __name__ == '__main__':
     while True:
         command = input("Enter command (start/stop/exit): ").strip().lower()
         if command == 'start':
-            print("started")
+            print(cli.getNormalData())
         elif command == 'stop':
             cli.stop()
         elif command == 'exit':
