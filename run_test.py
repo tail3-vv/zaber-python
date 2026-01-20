@@ -14,13 +14,13 @@ init_pos = 5
 init_coef = 1
 speed = 0.5 # speed of travel in mm/s (millimeter/second)
 upper_limit = 20 # 32 Newtons
-num_runs = 3 # Number of test runs per sensor
+num_runs = int(input("How many runs? ")) # Number of test runs per sensor
 Extract = 12.75 # initial travel distance before starting test cycle
 Cycle_Speed = 0.01 # speed of travel in mm/s
 isNewerUSB225 = 1 #### do we need this?
 
 # Zaber setup
-zaber = ZaberCLI()
+zaber = ZaberCLI(comport="COM7")
 
 # Futek Load Cell setup
 futek = FUTEKDeviceCLI()
@@ -38,10 +38,12 @@ print("Current Position is: {currentPosition_mm:.2f} mm \n")
 for run_idx in range(num_runs):
     #Initial params per cycle
     init_force = 1
-    force_readings = [0] * 1000 # 1-D array of zeros
+    force_readings = [0] * 12000 # 1-D array of zeros
     init_time = datetime.now()
     init_seconds = init_time.second + init_time.microsecond / 1e6
 
+    if zaber.axis.is_parked():
+        zaber.axis.unpark()
     # Move actuator down
     zaber.axis.move_velocity(speed*0.1, Units.VELOCITY_MILLIMETRES_PER_SECOND)
     init_val = 0 # initial value for force
@@ -61,7 +63,7 @@ for run_idx in range(num_runs):
         stage_force = reading_force - init_val
         force_readings[force_idx] = stage_force
         force_idx = force_idx + 1
-        print("Force Value: " + str(force_idx))
+        print("Force Value: " + str(stage_force))
 
         # Once sample is hit, stop the axis
         if stage_force >= upper_limit:
@@ -81,7 +83,7 @@ for run_idx in range(num_runs):
         stage_force = reading_force - init_val
         force_readings[force_idx] = stage_force
         force_idx = force_idx + 1
-        print("Force Value: " + str(force_idx))
+        print("Force Value: " + str(stage_force))
 
         # Grab current position
         curr_pos = zaber.axis.get_position()
@@ -92,6 +94,8 @@ for run_idx in range(num_runs):
             break
 
     # move back to original position
+    if zaber.axis.is_parked():
+        zaber.axis.unpark()
     zaber.axis.move_absolute(17, Units.LENGTH_MILLIMETRES)
     print("Run " + str(run_idx) + " completed")
 
@@ -123,6 +127,7 @@ for run_idx in range(num_runs):
     # Pause current run, reset sensor position manually and press enter to go to next run
     if(run_idx != num_runs - 1):
         input("Run is now paused.\nPress Enter to Continue to next run")
+        zaber.axis.move_relative((Extract-1.8), Units.LENGTH_MILLIMETRES)
     else:
         print("All runs complete.")
 

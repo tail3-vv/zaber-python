@@ -8,7 +8,7 @@ from zaber_cli import ZaberCLI
 USB connection name (ie COM3, COM4, COM5) is varies by laptop
 Check device manager -> Ports (COM & LPT) to see which connection works
 """
-cli = ZaberCLI()
+cli = ZaberCLI(comport="COM7")
 
 axis = cli.axis
 

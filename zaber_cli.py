@@ -2,8 +2,8 @@ from zaber_motion.ascii import Connection
 from zaber_motion import exceptions
 
 class ZaberCLI():
-    def __init__(self):
-        self.connection = Connection.open_serial_port("COM4")
+    def __init__(self, comport):
+        self.connection = Connection.open_serial_port(comport)
 
         # Get axis
         device_list = self.connection.detect_devices()
