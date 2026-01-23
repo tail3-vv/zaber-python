@@ -10,8 +10,8 @@ This is where the real test will be run.
 TODO: implement the other debug scripts later
 """
 
-init_pos = 5
-init_coef = 1
+init_pos = 5 ### this is never used
+init_coef = 1 ### this is never used
 speed = 0.5 # speed of travel in mm/s (millimeter/second)
 upper_limit = 20 # 32 Newtons
 num_runs = int(input("How many runs? ")) # Number of test runs per sensor
