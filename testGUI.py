@@ -2,7 +2,7 @@ import tkinter as tk
 from tkinter import Tk
 from tkinter import ttk
 from tkinter import filedialog as fd
-
+import serial.tools.list_ports
 
 class mainWindow():
     def __init__(self):
@@ -104,7 +104,10 @@ class mainWindow():
         heading = tk.Label(heading_frame, 
                            text="Verify settings before beginning tests. \n" \
                            "You cannot move on until all settings are filled in.")
-        heading.pack(padx=10, pady=10)
+        heading.pack(padx=10, pady=20)
+
+        # Wait for Zaber comport to be selected before Futek
+        is_zaber_plugged = tk.DISABLED
 
         def enter_num_runs():
             """ 
@@ -127,11 +130,44 @@ class mainWindow():
                             variable=self.is_pause_between_runs, command=self.is_pause_between_runs.get())
             checkbox.grid(sticky="w", row=3, column=0, padx=10)
 
-        def select_zaber_comport():
-            pass
-        
+        def select_comports():
+            """Selection box for zaber and futek comports"""
+            def zaber_select(event):
+                """When a zaber comport is selected the futek comport gets enabled"""
+                # Enable futek combobox
+                futek_combobox.config(state=tk.NORMAL)
+
+            zaber_label = tk.Label(settings, text="Zaber Comport:")
+            zaber_combobox = ttk.Combobox(settings, values=[port.device for port in serial.tools.list_ports.comports()],
+                                            state='readonly', textvariable=self.zaber_comport)
+            zaber_combobox.set('Select Comport')
+
+            zaber_label.grid(sticky='w', row=4, column=0, padx=10,pady=10)
+            zaber_combobox.grid(sticky='w', row=4, column=0, padx=125, pady=10)
+            
+            zaber_combobox.bind("<<ComboboxSelected>>", zaber_select)
+
+            # Futek
+            futek_label = tk.Label(settings, text="Futek Comport:")
+            futek_combobox = ttk.Combobox(settings, values=[port.device for port in serial.tools.list_ports.comports()],
+                                            state=tk.DISABLED, textvariable=self.futek_comport)
+            futek_combobox.set('Select Comport')
+
+            futek_label.grid(sticky='w', row=5, column=0, padx=10,pady=10)
+            futek_combobox.grid(sticky='w', row=5, column=0, padx=125, pady=10)
+
+        def begin_test_btn():
+            """ Opens dialog to verify settings before actually beginning tests """
+            btn = tk.Button(settings, text="Begin Test", command=print("opened"))
+            btn.grid(sticky="w", row=6, column=0, padx=215, pady=115)
+                
+
+        self.add_separator(y_value=90, window=settings)
         enter_num_runs()
         pause_between_checkbox()
+        select_comports()
+        self.add_separator(y_value=250, window=settings)
+        begin_test_btn()
 
 main = mainWindow()
 main.select_folder()
