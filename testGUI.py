@@ -3,14 +3,17 @@ from tkinter import Tk
 from tkinter import ttk
 from tkinter import filedialog as fd
 import serial.tools.list_ports
-
+from run_test import run_tests, test_funct
 class mainWindow():
     def __init__(self):
         self.root = Tk(screenName=None, baseName=None, className='Tk', useTk=1)
         self.root.title("Zaber Control Stage")
-        self.root.geometry("600x230")
+        self.root.geometry("625x375")
         self.root.resizable(False, False)
 
+        """
+        These are the initial test settings
+        """
         # Initially these are empty strings
         self.saved_path = tk.StringVar()
         self.sensor_id = tk.StringVar()
@@ -19,10 +22,47 @@ class mainWindow():
         self.is_create_files = tk.IntVar() # this is boolean
         self.n_runs = tk.IntVar(value=3)
         self.is_pause_between_runs = tk.IntVar(value=1) # this is boolean
+        self.is_test_started = tk.IntVar(value=0) # this is boolean
 
         # Comports have default values
         self.zaber_comport = tk.StringVar(value="COM3")
         self.futek_comport = tk.StringVar(value="COM4")
+
+        """
+        These variables control the state of the test ie pauses, stops, recalibrations
+        """
+        self.textbox = None
+        self.toggle_pause = tk.IntVar(value=0) # this is boolean, paused=1, not paused=0
+
+    def display_updates(self):
+        """ Display updates about current run progress """
+        textbox = tk.Text(self.root, 
+                          width=61,
+                          height=5,
+                          borderwidth=5,
+                          relief='groove'
+                          )
+        textbox.grid(sticky='w', row=0, column=0, rowspan=1, 
+                     columnspan=3, padx=10, pady=20)
+        textbox.config(state=tk.DISABLED)
+        self.textbox = textbox
+    
+    def update_textbox(self, text):
+        self.textbox.config(state=tk.NORMAL)
+        self.textbox.insert(tk.END, f"{text}\n")
+        self.textbox.config( state=tk.DISABLED)
+
+    # *args is necessary for the trace() funct
+    def trace_path(self, *args):
+        """ Trace changes to the saved_path variable """
+        path = self.saved_path.get()
+        sensor = self.sensor_id.get()
+        checkbox = self.is_create_files.get()
+        testStarted = self.is_test_started.get()
+        n_runs = self.n_runs.get()
+        if testStarted:
+            self.update_textbox("Run 1 started")
+            state = test_funct(n_runs, path, sensor)
 
     def select_folder(self):
         """ Prompt user for save folder """
@@ -45,19 +85,6 @@ class mainWindow():
         label.grid(sticky='w', row=1, column=0, padx=10,pady=10)
         folder_entry.grid(sticky='w', row=1, column=1, pady=10)
         open_button.grid(sticky='w', row=1, column=2, padx=10,pady=10)
-
-    # *args is necessary for the trace() funct
-    def trace_path(self, *args):
-        """ Trace changes to the saved_path variable """
-        path = self.saved_path.get()
-        sensor = self.sensor_id.get()
-        checkbox = self.is_create_files.get()
-        if path:
-            print(path)
-        if sensor:
-            print(sensor)
-        if checkbox:
-            print(checkbox)
 
     def enter_sensor_id(self):
         """ Prompt user for sensor id """
@@ -83,10 +110,19 @@ class mainWindow():
 
     def begin_test_btn(self):
         """ Opens dialog to verify settings before actually beginning tests """
-        btn = tk.Button(self.root, text="Begin Test", command=self.open_new_window)
+        btn = tk.Button(self.root, text="Begin Test", command=self.open_settings)
         btn.grid(sticky="w", row=6, column=3)
+    
+    def toggle_pause_btn(self):
+        """
+        Pauses current run
+        Checks if there is a test occuring before pausing
+        If test is already paused, text changes to unpause test
+        """
+        btn = tk.Button(self.root, text="Pause Run", command=print("paused"))
+        btn.grid(sticky="w", row=6, column=2)
 
-    def open_new_window(self):
+    def open_settings(self):
         """
         Opens a secondary window to verify settings before beginning tests
         """
@@ -105,9 +141,6 @@ class mainWindow():
                            text="Verify settings before beginning tests. \n" \
                            "You cannot move on until all settings are filled in.")
         heading.pack(padx=10, pady=20)
-
-        # Wait for Zaber comport to be selected before Futek
-        is_zaber_plugged = tk.DISABLED
 
         def enter_num_runs():
             """ 
@@ -158,8 +191,13 @@ class mainWindow():
 
         def begin_test_btn():
             """ Opens dialog to verify settings before actually beginning tests """
-            btn = tk.Button(settings, text="Begin Test", command=print("opened"))
+            def btn_clicked():
+                settings.grab_release()
+                settings.withdraw()
+                self.is_test_started.set(1)
+            btn = tk.Button(settings, text="Begin Test", command=btn_clicked)
             btn.grid(sticky="w", row=6, column=0, padx=215, pady=115)
+            
                 
 
         self.add_separator(y_value=90, window=settings)
@@ -169,16 +207,18 @@ class mainWindow():
         self.add_separator(y_value=250, window=settings)
         begin_test_btn()
 
-main = mainWindow()
-main.select_folder()
-main.saved_path.trace('w', main.trace_path)
+def run():
+    main = mainWindow()
+    main.display_updates()
+    main.select_folder()
+    main.enter_sensor_id()
+    main.add_separator(y_value=310, window=main.root) # about every 50 px is a row
+    main.create_files_checkbox()
+    main.begin_test_btn()
+    main.toggle_pause_btn()
 
-main.enter_sensor_id()
-main.sensor_id.trace('w', main.trace_path)
+    main.is_test_started.trace('w', main.trace_path)
 
-main.add_separator(y_value=100, window=main.root) # about every 50 px is a row
-main.create_files_checkbox()
-main.is_create_files.trace('w', main.trace_path)
-main.begin_test_btn()
+    main.root.mainloop()
 
-main.root.mainloop()
+run()

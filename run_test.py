@@ -1,6 +1,6 @@
-from zaber_motion import Units
-from zaber_cli import ZaberCLI
-from futek_cli import FUTEKDeviceCLI
+# from zaber_motion import Units
+# from zaber_cli import ZaberCLI
+# from futek_cli import FUTEKDeviceCLI
 import xlsxwriter
 from pathlib import Path
 from datetime import datetime
@@ -8,127 +8,136 @@ import numpy as np
 """
 This is where the real test will be run. 
 TODO: implement the other debug scripts later
+
+returns 'paused' if test is pausing
+returns 'run x' if run x is complete
+returns 'done' if all runs are completed
 """
+def test_funct(n_runs, folder_path, sensor):
+    print(f"beginning a test with {n_runs} runs\nfolder path {folder_path}\nsensor: {sensor}")
+    for i in range(3):
+        print(f"Test run {i}")
 
-init_pos = 5 ### this is never used
-init_coef = 1 ### this is never used
-speed = 0.5 # speed of travel in mm/s (millimeter/second)
-upper_limit = 20 # 32 Newtons
-num_runs = int(input("How many runs? ")) # Number of test runs per sensor
-Extract = 12.75 # initial travel distance before starting test cycle
-Cycle_Speed = 0.01 # speed of travel in mm/s
-isNewerUSB225 = 1 #### do we need this?
+def run_tests(n_runs, folder_path, sensor):
+    init_pos = 5 ### this is never used
+    init_coef = 1 ### this is never used
+    speed = 0.5 # speed of travel in mm/s (millimeter/second)
+    upper_limit = 20 # 32 Newtons
+    num_runs = n_runs #int(input("How many runs? ")) # Number of test runs per sensor
+    Extract = 12.75 # initial travel distance before starting test cycle
+    Cycle_Speed = 0.01 # speed of travel in mm/s THIS IS ALSO NEVER USED
+    isNewerUSB225 = 1 #### do we need this?
 
-# Zaber setup
-zaber = ZaberCLI(comport="COM7")
+    # Zaber setup
+    zaber = ZaberCLI(comport="COM7")
 
-# Futek Load Cell setup
-futek = FUTEKDeviceCLI()
+    # Futek Load Cell setup
+    futek = FUTEKDeviceCLI()
 
-# Move 12.75 before cycle
-# Keep constant:setting gap distance between base with sensor to tip to 1.5mm
-zaber.axis.move_relative((Extract-1.8), Units.LENGTH_MILLIMETRES)
+    # Move 12.75 before cycle
+    # Keep constant:setting gap distance between base with sensor to tip to 1.5mm
+    zaber.axis.move_relative((Extract-1.8), Units.LENGTH_MILLIMETRES)
 
-# Display current position in mm after relative move
-currentPosition = zaber.axis.get_position()
-currentPosition_mm = (currentPosition*0.047625)/1000
-print("Current Position is: {currentPosition_mm:.2f} mm \n")
+    # Display current position in mm after relative move
+    currentPosition = zaber.axis.get_position()
+    currentPosition_mm = (currentPosition*0.047625)/1000
+    print("Current Position is: {currentPosition_mm:.2f} mm \n")
 
-# Begin Test Loop
-for run_idx in range(num_runs):
-    #Initial params per cycle
-    init_force = 1
-    force_readings = [0] * 12000 # 1-D array of zeros
-    init_time = datetime.now()
-    init_seconds = init_time.second + init_time.microsecond / 1e6
+    # Begin Test Loop
+    for run_idx in range(num_runs):
+        #Initial params per cycle
+        init_force = 1
+        force_readings = [0] * 12000 # 1-D array of zeros
+        init_time = datetime.now()
+        init_seconds = init_time.second + init_time.microsecond / 1e6
 
-    if zaber.axis.is_parked():
-        zaber.axis.unpark()
-    # Move actuator down
-    zaber.axis.move_velocity(speed*0.1, Units.VELOCITY_MILLIMETRES_PER_SECOND)
-    init_val = 0 # initial value for force
-    force_idx = 0
-    while True:
-        reading_force = futek.getNormalData() # Read force value
+        if zaber.axis.is_parked():
+            zaber.axis.unpark()
+        # Move actuator down
+        zaber.axis.move_velocity(speed*0.1, Units.VELOCITY_MILLIMETRES_PER_SECOND)
+        init_val = 0 # initial value for force
+        force_idx = 0
+        while True:
+            reading_force = futek.getNormalData() # Read force value
 
-        if isNewerUSB225:
-            reading_force = reading_force * (-4.44822) # convert pounds to Newtons and change polarity
+            if isNewerUSB225:
+                reading_force = reading_force * (-4.44822) # convert pounds to Newtons and change polarity
 
-        if init_force: # Verify initial values
-            init_val = reading_force # TODO: There should be an easier way than this flag
-            init_force = 0
+            if init_force: # Verify initial values
+                init_val = reading_force # TODO: There should be an easier way than this flag
+                init_force = 0
+            
+            # Take the residual of the current force vs inital one
+            # Store residual in force_readings and print out residual
+            stage_force = reading_force - init_val
+            force_readings[force_idx] = stage_force
+            force_idx = force_idx + 1
+            print("Force Value: " + str(stage_force))
+
+            # Once sample is hit, stop the axis
+            if stage_force >= upper_limit:
+                zaber.axis.stop()
+                break
         
-        # Take the residual of the current force vs inital one
-        # Store residual in force_readings and print out residual
-        stage_force = reading_force - init_val
-        force_readings[force_idx] = stage_force
-        force_idx = force_idx + 1
-        print("Force Value: " + str(stage_force))
+        # Move actuator back up
+        zaber.axis.move_velocity(-speed*2, Units.VELOCITY_MILLIMETRES_PER_SECOND)
+        while True:
+            reading_force = futek.getNormalData()
 
-        # Once sample is hit, stop the axis
-        if stage_force >= upper_limit:
-            zaber.axis.stop()
-            break
-    
-    # Move actuator back up
-    zaber.axis.move_velocity(-speed*2, Units.VELOCITY_MILLIMETRES_PER_SECOND)
-    while True:
-        reading_force = futek.getNormalData()
+            if isNewerUSB225:
+                reading_force = reading_force * (-4.44822) # convert pounds to Newtons and change polarity
 
-        if isNewerUSB225:
-            reading_force = reading_force * (-4.44822) # convert pounds to Newtons and change polarity
+            # Take the residual of the current force vs inital one
+            # Store residual in force_readings and print out residual
+            stage_force = reading_force - init_val
+            force_readings[force_idx] = stage_force
+            force_idx = force_idx + 1
+            print("Force Value: " + str(stage_force))
 
-        # Take the residual of the current force vs inital one
-        # Store residual in force_readings and print out residual
-        stage_force = reading_force - init_val
-        force_readings[force_idx] = stage_force
-        force_idx = force_idx + 1
-        print("Force Value: " + str(stage_force))
+            # Grab current position
+            curr_pos = zaber.axis.get_position()
+            last_position = (curr_pos*0.047625)/1000
+            print("Position: " + str(last_position))
+            if last_position <= (currentPosition*0.047625)/1000:
+                zaber.axis.stop()
+                break
 
-        # Grab current position
-        curr_pos = zaber.axis.get_position()
-        last_position = (curr_pos*0.047625)/1000
-        print("Position: " + str(last_position))
-        if last_position <= (currentPosition*0.047625)/1000:
-            zaber.axis.stop()
-            break
+        # move back to original position
+        if zaber.axis.is_parked():
+            zaber.axis.unpark()
+        zaber.axis.move_absolute(17, Units.LENGTH_MILLIMETRES)
+        print("Run " + str(run_idx) + " completed")
 
-    # move back to original position
-    if zaber.axis.is_parked():
-        zaber.axis.unpark()
-    zaber.axis.move_absolute(17, Units.LENGTH_MILLIMETRES)
-    print("Run " + str(run_idx) + " completed")
+        # Save data to run file
+        # We could make this a separate function
+        file_name = "Run " + str(run_idx + 1) + ".xlsx" # create file name TODO: Will need to create folder if it does not exist 
+        path = Path("./FUT/" + file_name)
+        workbook = xlsxwriter.Workbook(file_name)
+        worksheet = workbook.add_worksheet(str(run_idx + 1))
 
-    # Save data to run file
-    # We could make this a separate function
-    file_name = "Run " + str(run_idx + 1) + ".xlsx" # create file name TODO: Will need to create folder if it does not exist 
-    path = Path("./FUT/" + file_name)
-    workbook = xlsxwriter.Workbook(file_name)
-    worksheet = workbook.add_worksheet(str(run_idx + 1))
+        # Create Column headers
+        worksheet.write('A1', 'Index')
+        worksheet.write('B1', 'Load Cell')
+        worksheet.write('C1', 'Time')
 
-    # Create Column headers
-    worksheet.write('A1', 'Index')
-    worksheet.write('B1', 'Load Cell')
-    worksheet.write('C1', 'Time')
+        # create time array
 
-    # create time array
+        time = np.linspace(init_seconds, 
+                        (len(force_readings)- 1) * 0.016 + init_seconds,
+                        len(force_readings))
+        
+        # Save data arrays to file
+        for index in range(len(force_readings)):
+            worksheet.write(index+1, 0, index + 1)
+            worksheet.write(index+1, 1, force_readings[index])
+            worksheet.write(index+1, 2, time[index])
+        workbook.close()
 
-    time = np.linspace(init_seconds, 
-                    (len(force_readings)- 1) * 0.016 + init_seconds,
-                    len(force_readings))
-    
-    # Save data arrays to file
-    for index in range(len(force_readings)):
-        worksheet.write(index+1, 0, index + 1)
-        worksheet.write(index+1, 1, force_readings[index])
-        worksheet.write(index+1, 2, time[index])
-    workbook.close()
+        # Pause current run, reset sensor position manually and press enter to go to next run
+        if(run_idx != num_runs - 1):
+            input("Run is now paused.\nPress Enter to Continue to next run")
+            zaber.axis.move_relative((Extract-1.8), Units.LENGTH_MILLIMETRES)
+        else:
+            print("All runs complete.")
 
-    # Pause current run, reset sensor position manually and press enter to go to next run
-    if(run_idx != num_runs - 1):
-        input("Run is now paused.\nPress Enter to Continue to next run")
-        zaber.axis.move_relative((Extract-1.8), Units.LENGTH_MILLIMETRES)
-    else:
-        print("All runs complete.")
-
-zaber.disconnect()
+    zaber.disconnect()
