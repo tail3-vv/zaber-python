@@ -5,6 +5,8 @@ import xlsxwriter
 from pathlib import Path
 from datetime import datetime
 import numpy as np
+import time
+
 """
 This is where the real test will be run. 
 TODO: implement the other debug scripts later
@@ -13,10 +15,29 @@ returns 'paused' if test is pausing
 returns 'run x' if run x is complete
 returns 'done' if all runs are completed
 """
-def test_funct(n_runs, folder_path, sensor):
-    print(f"beginning a test with {n_runs} runs\nfolder path {folder_path}\nsensor: {sensor}")
-    for i in range(3):
-        print(f"Test run {i}")
+
+def test_funct(self, n_runs, current_run, folder_path, sensor, zaber_comport, futek_comport):
+    # instead of passing in n_runs, we can pass in current_run if the option to
+    # pause between runs is turned on
+    ### for the first couple runs
+    # time.sleep(5)
+    if current_run < n_runs:
+        for i in range(1):
+            # Check if paused during the loop
+            if self.toggle_pause.get() == 1: # TODO: Right here, we call recalibration script
+                return current_run  # Return same run number to resume from where we left off
+            time.sleep(1)
+            self.root.update()  # Keep GUI responsive
+        return int(current_run) + 1
+    elif current_run == n_runs:
+        for i in range(1):
+            # Check if paused during the loop
+            if self.toggle_pause.get() == 1:  # TODO: Right here, we call recalibration script
+                return current_run  # Return same run number to resume from where we left off
+            time.sleep(1)
+            self.root.update()  # Keep GUI responsive
+        return int(current_run) + 1
+
 
 def run_tests(n_runs, folder_path, sensor):
     init_pos = 5 ### this is never used
@@ -110,7 +131,7 @@ def run_tests(n_runs, folder_path, sensor):
 
         # Save data to run file
         # We could make this a separate function
-        file_name = "Run " + str(run_idx + 1) + ".xlsx" # create file name TODO: Will need to create folder if it does not exist 
+        file_name = "Run " + str(run_idx + 1) + ".xlsx" # create file name
         path = Path("./FUT/" + file_name)
         workbook = xlsxwriter.Workbook(file_name)
         worksheet = workbook.add_worksheet(str(run_idx + 1))

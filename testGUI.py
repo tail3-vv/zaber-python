@@ -3,8 +3,12 @@ from tkinter import Tk
 from tkinter import ttk
 from tkinter import filedialog as fd
 import serial.tools.list_ports
-from run_test import run_tests, test_funct
-class mainWindow():
+import time
+import xlsxwriter
+from pathlib import Path
+import datetime
+
+class MainWindow():
     def __init__(self):
         self.root = Tk(screenName=None, baseName=None, className='Tk', useTk=1)
         self.root.title("Zaber Control Stage")
@@ -19,11 +23,14 @@ class mainWindow():
         self.sensor_id = tk.StringVar()
 
         # Initially these are set to 0 unless specified
-        self.is_create_files = tk.IntVar() # this is boolean
-        self.n_runs = tk.IntVar(value=3)
-        self.is_pause_between_runs = tk.IntVar(value=1) # this is boolean
-        self.is_test_started = tk.IntVar(value=0) # this is boolean
+        self.is_create_files = tk.BooleanVar(value=1) # this is boolean
+        self.is_pause_between_runs = tk.BooleanVar(value=1) # this is boolean
+        self.is_test_started = tk.BooleanVar(value=0) # this is boolean
 
+        # Track the current run
+        self.n_runs = tk.IntVar(value=3)
+        self.current_run = tk.IntVar(value=1)
+        
         # Comports have default values
         self.zaber_comport = tk.StringVar(value="COM3")
         self.futek_comport = tk.StringVar(value="COM4")
@@ -32,7 +39,9 @@ class mainWindow():
         These variables control the state of the test ie pauses, stops, recalibrations
         """
         self.textbox = None
+        self.pause_btn = None
         self.toggle_pause = tk.IntVar(value=0) # this is boolean, paused=1, not paused=0
+        self.widgets = [] # when testing starts, these widgets will all get disabled
 
     def display_updates(self):
         """ Display updates about current run progress """
@@ -53,17 +62,116 @@ class mainWindow():
         self.textbox.config( state=tk.DISABLED)
 
     # *args is necessary for the trace() funct
+    # TODO: Possibly make separate trace functions for pause run and continuous run
     def trace_path(self, *args):
         """ Trace changes to the saved_path variable """
+        test_start = self.is_test_started.get()
+        if test_start:
+            # Verify widgets disabled and continue testing
+            for w in self.widgets:
+                w.config(state=tk.DISABLED)
+            self._continue_test()
+        else:
+            # Reenable widgets
+            for w in self.widgets:
+                w.config(state=tk.NORMAL)
+
+    def trace_pause(self, *args):
+        """ Trace changes to the toggle_pause variable to resume testing when unpaused """
+        self.update_pause_btn() # Updates pause button text based on toggle state
+
+    def _continue_test(self):
+        """ Helper function to continue test if conditions are met """
+        ### Variables that change based on settings
         path = self.saved_path.get()
         sensor = self.sensor_id.get()
         checkbox = self.is_create_files.get()
         testStarted = self.is_test_started.get()
         n_runs = self.n_runs.get()
-        if testStarted:
-            self.update_textbox("Run 1 started")
-            state = test_funct(n_runs, path, sensor)
+        current_run = self.current_run.get()
+        is_paused = self.toggle_pause.get()
+        is_pause_between_runs = self.is_pause_between_runs.get()
+        zaber_comport = self.zaber_comport.get()
+        futek_comport = self.futek_comport.get()
+        self.update_pause_btn() # Update pause button text
 
+        if testStarted and (is_paused == 0):
+            # Run Test function and update textbox according to progress
+            self.update_textbox(f"Beginning run {current_run}")
+            state = self.test_funct(n_runs, current_run, path, sensor, zaber_comport, futek_comport)
+            
+            if current_run == state: # Run paused mid execution
+                self.update_textbox(f"Run {current_run} was paused")
+            else:
+                self.update_textbox(f"Run {current_run} completed")
+
+            if current_run == n_runs:
+                self.update_textbox(f"All runs complete")
+                self.testing_complete() # Open dialogue
+                self.is_test_started.set(0) # Testing mode is now off
+                self.current_run.set(1) # Run is set back to 1
+            else:
+                self.current_run.set(state) # Increment current run
+
+            if state <= n_runs:
+                self.toggle_pause.set(1) # Run is now Paused
+                self.update_pause_btn() # Update pause button text
+
+
+    def test_funct(self, n_runs, current_run, folder_path, sensor, zaber_comport, futek_comport):
+        print(current_run)
+        # Create a datetime object (e.g., the current date and time)
+        now = datetime.datetime.now()
+
+        # Extract components
+        year = str(now.year)[2:]
+        month = str(now.month)
+        day = str(now.day)
+
+        if len(month) < 2:
+            month = f"0{month}"
+        if len(day) < 2:
+            day = f"0{day}"
+        file_name = "Run " + str(current_run) + ".xlsx" # create file name
+            
+        path = Path(f"{self.saved_path.get()}/{sensor}/{month} {day} {year}_325mm2_EB")
+        # C:/Users/emili/OneDrive/Documents/Projects/VenaVitals/zaber-python
+        try:
+            path.mkdir(parents=True, exist_ok=True)
+        except OSError as e:
+            print(f"Error creating directory {path}: {e}")
+        path = path / file_name
+        force_readings = [1, 11, 213123, 1232, 121221]
+        workbook = xlsxwriter.Workbook(path)
+        worksheet = workbook.add_worksheet(str(current_run))
+        
+        worksheet.write('A1', 'Index')
+        worksheet.write('B1', 'Load Cell')
+        for index in range(len(force_readings)):
+            worksheet.write(index+1, 0, index + 1)
+            worksheet.write(index+1, 1, force_readings[index])
+        workbook.close()
+        
+        if current_run < n_runs:
+            for i in range(1):
+                # Check if paused during the loop
+                if self.toggle_pause.get() == 1: # TODO: Right here, we call recalibration script
+                    return current_run  # Return same run number to resume from where we left off
+                time.sleep(1)
+                self.root.update()  # Keep GUI responsive
+            return int(current_run) + 1
+        elif current_run == n_runs:
+            for i in range(1):
+                # Check if paused during the loop
+                if self.toggle_pause.get() == 1:  # TODO: Right here, we call recalibration script
+                    return current_run  # Return same run number to resume from where we left off
+                time.sleep(1)
+                self.root.update()  # Keep GUI responsive
+            return int(current_run) + 1
+    
+    """
+    GUI Widgets that remain mostly the same during testing
+    """
     def select_folder(self):
         """ Prompt user for save folder """
         def open_folder():
@@ -86,6 +194,10 @@ class mainWindow():
         folder_entry.grid(sticky='w', row=1, column=1, pady=10)
         open_button.grid(sticky='w', row=1, column=2, padx=10,pady=10)
 
+        # Add Widgets to list
+        self.widgets.append(folder_entry)
+        self.widgets.append(open_button)
+
     def enter_sensor_id(self):
         """ Prompt user for sensor id """
         # Widget Labels
@@ -95,6 +207,9 @@ class mainWindow():
         # Widget positions
         label.grid(sticky='w', row=2, column=0, padx=10,pady=10)
         sensor_entry.grid(sticky='w', row=2, column=1, pady=10)
+
+        # Add Widgets to list
+        self.widgets.append(sensor_entry)
     
     def add_separator(self, y_value, window):
         """Adds seperator line to window"""
@@ -107,21 +222,44 @@ class mainWindow():
         checkbox = tk.Checkbutton(self.root, text="Create folders if they do not exist",
                                   variable=self.is_create_files, command=self.is_create_files.get())
         checkbox.grid(sticky="w", row=4, column=1, pady=40)
+        # Add Widgets to list
+        self.widgets.append(checkbox)
 
     def begin_test_btn(self):
         """ Opens dialog to verify settings before actually beginning tests """
         btn = tk.Button(self.root, text="Begin Test", command=self.open_settings)
         btn.grid(sticky="w", row=6, column=3)
-    
-    def toggle_pause_btn(self):
+        # Add Widgets to list
+        self.widgets.append(btn)
+        
+    def create_pause_btn(self):
         """
         Pauses current run
         Checks if there is a test occuring before pausing
         If test is already paused, text changes to unpause test
         """
-        btn = tk.Button(self.root, text="Pause Run", command=print("paused"))
-        btn.grid(sticky="w", row=6, column=2)
+        self.pause_btn = tk.Button(self.root, text="Pause Run", 
+                                   command=self._helper_pause,
+                                   state=tk.DISABLED)
+        self.pause_btn.grid(sticky="w", row=6, column=2)
 
+    def _helper_pause(self, *args):
+        if self.toggle_pause.get() == 0:
+            self.toggle_pause.set(1)
+        elif self.toggle_pause.get() == 1: # if test is Paused then unpause
+            self.toggle_pause.set(0)
+            self._continue_test()
+
+    def update_pause_btn(self, *args):
+        """ Updates pause text to be correct """
+        if self.toggle_pause.get() == 0: # Test is not Paused
+            self.pause_btn.config(text="Pause Run")
+        else: # Test is Paused
+            self.pause_btn.config(text="Unpause Run")
+
+    """
+    Settings Dialogue where the user can manipulate the various testing conditions
+    """
     def open_settings(self):
         """
         Opens a secondary window to verify settings before beginning tests
@@ -190,15 +328,16 @@ class mainWindow():
             futek_combobox.grid(sticky='w', row=5, column=0, padx=125, pady=10)
 
         def begin_test_btn():
-            """ Opens dialog to verify settings before actually beginning tests """
+            """ Actually begins testing """
+            # TODO: Make this button disabled until futek comport has been found
             def btn_clicked():
                 settings.grab_release()
                 settings.withdraw()
+                self.pause_btn.config(state=tk.NORMAL)
                 self.is_test_started.set(1)
+    
             btn = tk.Button(settings, text="Begin Test", command=btn_clicked)
             btn.grid(sticky="w", row=6, column=0, padx=215, pady=115)
-            
-                
 
         self.add_separator(y_value=90, window=settings)
         enter_num_runs()
@@ -207,18 +346,75 @@ class mainWindow():
         self.add_separator(y_value=250, window=settings)
         begin_test_btn()
 
+    """
+    Dialogue(s) pop ups: Error, test complete, confirmations, etc.
+    """
+    def error(self, text):
+        # Create a new top-level window
+        error = tk.Toplevel(self.root)
+        error.title("An Error Has Occured")
+        error.geometry("500x200") 
+        error.resizable(False, False)
+        # Disable interaction with main window
+        error.grab_set()
+
+        # Heading
+        heading_frame = tk.Frame(error, width=300, height=50)
+        heading_frame.grid(sticky='w', row=1, pady=10)
+        heading = tk.Label(heading_frame, 
+                           text=f"{text}")
+        heading.pack(padx=20, pady=20)
+    
+    def testing_complete(self):
+        def new_test(*args):
+            """Helper function to go back to testing window"""
+            complete.grab_release()
+            complete.withdraw()
+
+        # Create a new top-level window
+        complete = tk.Toplevel(self.root)
+        complete.title("Testing complete")
+        complete.geometry("600x150") 
+        complete.resizable(False, False)
+        # Disable interaction with main window
+        complete.grab_set()
+
+        # Heading
+        heading_frame = tk.Frame(complete, width=300, height=50)
+        heading_frame.grid(sticky='w', row=1, pady=10)
+        sensor = self.sensor_id.get()
+        heading = tk.Label(heading_frame, 
+                           text=f"All Runs have been completed for sensor {sensor}.")
+        heading.pack(padx=20, pady=20)
+        self.add_separator(y_value=100, window=complete) # about every 50 px is a row
+        # Buttons
+        exit_btn = tk.Button(complete, text="Exit", 
+                             command=self.root.destroy, 
+                             width=10, height=1)
+        test_btn = tk.Button(complete, text="New Test", 
+                             command=new_test, 
+                             width=10, height=1)
+        # TODO: Create analysis function
+        analysis_btn = tk.Button(complete, text="Perform Analysis", 
+                             command=new_test, 
+                             width=18, height=1)
+        # Button arrangment
+        exit_btn.grid(sticky='w', row=2, column=1, padx=5, pady=30)
+        test_btn.grid(sticky='w', row=2, column=2, padx=5, pady=30)
+        analysis_btn.grid(sticky='w', row=2, column=3, columnspan=2, padx=5, pady=30)
+
 def run():
-    main = mainWindow()
+    main = MainWindow()
     main.display_updates()
     main.select_folder()
     main.enter_sensor_id()
     main.add_separator(y_value=310, window=main.root) # about every 50 px is a row
     main.create_files_checkbox()
     main.begin_test_btn()
-    main.toggle_pause_btn()
+    main.create_pause_btn()
 
     main.is_test_started.trace('w', main.trace_path)
+    main.toggle_pause.trace('w', main.trace_pause)
 
     main.root.mainloop()
-
 run()
