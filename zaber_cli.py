@@ -3,6 +3,8 @@ from zaber_motion import exceptions
 
 class ZaberCLI():
     def __init__(self, comport):
+        # TODO: we probably need to put self.connection instantiation
+        # back into a function in order to return error message if an error occurs
         self.connection = Connection.open_serial_port(comport)
 
         # Get axis
