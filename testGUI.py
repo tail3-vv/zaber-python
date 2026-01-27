@@ -119,27 +119,10 @@ class MainWindow():
 
 
     def test_funct(self, n_runs, current_run, folder_path, sensor, zaber_comport, futek_comport):
-        print(current_run)
         # Create a datetime object (e.g., the current date and time)
-        now = datetime.datetime.now()
+        path = Path(self.saved_path.get())
 
-        # Extract components
-        year = str(now.year)[2:]
-        month = str(now.month)
-        day = str(now.day)
-
-        if len(month) < 2:
-            month = f"0{month}"
-        if len(day) < 2:
-            day = f"0{day}"
         file_name = "Run " + str(current_run) + ".xlsx" # create file name
-            
-        path = Path(f"{self.saved_path.get()}/{sensor}/{month} {day} {year}_325mm2_EB")
-        # C:/Users/emili/OneDrive/Documents/Projects/VenaVitals/zaber-python
-        try:
-            path.mkdir(parents=True, exist_ok=True)
-        except OSError as e:
-            print(f"Error creating directory {path}: {e}")
         path = path / file_name
         force_readings = [1, 11, 213123, 1232, 121221]
         workbook = xlsxwriter.Workbook(path)
@@ -227,8 +210,49 @@ class MainWindow():
 
     def begin_test_btn(self):
         """ Opens dialog to verify settings before actually beginning tests """
-        btn = tk.Button(self.root, text="Begin Test", command=self.open_settings)
+        def verify_folderpath():
+            """ 
+            Helper function that makes sure folderpath is correct 
+            and creates new directory paths if not
+            """
+            sensor = self.sensor_id.get()
+            saved_path = self.saved_path.get()
+            if self.is_create_files.get():
+                now = datetime.datetime.now()
+
+                # Extract components
+                year = str(now.year)[2:]
+                month = str(now.month)
+                day = str(now.day)
+
+                if len(month) < 2:
+                    month = f"0{month}"
+                if len(day) < 2:
+                    day = f"0{day}"
+                if f"{month} {day} {year}_325mm2_EB" in self.saved_path.get():
+                    # If current day directory is already created
+                    path = Path(f"{saved_path}")
+                elif sensor in saved_path:
+                    # If Sensor directory is already created
+                    path = Path(f"{saved_path}/{month} {day} {year}_325mm2_EB")
+                else:
+                    # If No directory was created
+                    path = Path(f"{saved_path}/{sensor}/{month} {day} {year}_325mm2_EB")
+                # C:/Users/emili/OneDrive/Documents/Projects/VenaVitals/zaber-python
+                try:
+                    path.mkdir(parents=True, exist_ok=True)
+                    self.saved_path.set(path)
+                    self.open_settings()
+                except OSError as e:
+                    self.error(f"Error creating directory {path}: {e}")
+                    print(f"Error creating directory {path}: {e}")
+            else:
+                self.open_settings()
+
+        btn = tk.Button(self.root, text="Begin Test", command=verify_folderpath)
         btn.grid(sticky="w", row=6, column=3)
+
+
         # Add Widgets to list
         self.widgets.append(btn)
         
