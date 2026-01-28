@@ -58,7 +58,7 @@ class FUTEKDeviceCLI:
         if self.OpenedConnection:
             self.stop()
         print("Exiting the CLI...")
-        System.Environment.Exit(0)
+        #System.Environment.Exit(0)
 
 if __name__ == '__main__':
     cli = FUTEKDeviceCLI()

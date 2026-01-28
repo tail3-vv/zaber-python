@@ -47,6 +47,7 @@ class MainWindow():
         self.toggle_pause = tk.IntVar(value=0) # this is boolean, paused=1, not paused=0
         self.widgets = [] # when testing starts, these widgets will all get disabled
 
+
     def display_updates(self):
         """ Display updates about current run progress """
         textbox = tk.Text(self.root, 
@@ -98,6 +99,7 @@ class MainWindow():
         zaber_comport = self.zaber_comport.get()
         futek_comport = self.futek_comport.get()
         self.update_pause_btn() # Update pause button text
+        pause_flag = False # check if run is paused
 
         if testStarted and (is_paused == 0):
             # Run Test function and update textbox according to progress
@@ -107,10 +109,11 @@ class MainWindow():
 
             if current_run == state: # Run paused mid execution
                 self.update_textbox(f"Run {current_run} was paused")
+                pause_flag = True
             else:
                 self.update_textbox(f"Run {current_run} completed")
 
-            if current_run == n_runs:
+            if current_run == n_runs and pause_flag == False:
                 self.update_textbox(f"All runs complete")
                 self.testing_complete() # Open dialogue
                 self.is_test_started.set(0) # Testing mode is now off
@@ -184,6 +187,7 @@ class MainWindow():
             """ 
             Helper function that makes sure folderpath is correct 
             and creates new directory paths if not
+            TODO: Create FUT and CAP folder aswell
             """
             sensor = self.sensor_id.get()
             saved_path = self.saved_path.get()
@@ -368,7 +372,7 @@ class MainWindow():
         # Create a new top-level window
         complete = tk.Toplevel(self.root)
         complete.title("Testing complete")
-        complete.geometry("600x150") 
+        complete.geometry("700x150") 
         complete.resizable(False, False)
         # Disable interaction with main window
         complete.grab_set()
@@ -403,28 +407,29 @@ class MainWindow():
         file_name = "Run " + str(current_run) + ".xlsx" # create file name
         path = path / file_name
         force_readings = [1, 11, 213123, 1232, 121221]
-        workbook = xlsxwriter.Workbook(path)
-        worksheet = workbook.add_worksheet(str(current_run))
+        # workbook = xlsxwriter.Workbook(path)
+        # worksheet = workbook.add_worksheet(str(current_run))
         
-        worksheet.write('A1', 'Index')
-        worksheet.write('B1', 'Load Cell')
-        for index in range(len(force_readings)):
-            worksheet.write(index+1, 0, index + 1)
-            worksheet.write(index+1, 1, force_readings[index])
-        workbook.close()
+        # worksheet.write('A1', 'Index')
+        # worksheet.write('B1', 'Load Cell')
+        # for index in range(len(force_readings)):
+        #     worksheet.write(index+1, 0, index + 1)
+        #     worksheet.write(index+1, 1, force_readings[index])
+        # workbook.close()
         
         if current_run < n_runs:
             for i in range(1):
                 # Check if paused during the loop
                 if self.toggle_pause.get() == 1: # TODO: Right here, we call recalibration script
-                    return current_run  # Return same run number to resume from where we left off
+                    return current_run # Return same run number to resume from where we left off
+                time.sleep(1)
                 self.root.update()  # Keep GUI responsive
             return int(current_run) + 1
         elif current_run == n_runs:
             for i in range(1):
                 # Check if paused during the loop
                 if self.toggle_pause.get() == 1:  # TODO: Right here, we call recalibration script
-                    return current_run  # Return same run number to resume from where we left off
+                    return current_run # Return same run number to resume from where we left off
                 time.sleep(1)
                 self.root.update()  # Keep GUI responsive
             return int(current_run) + 1
@@ -442,6 +447,7 @@ class MainWindow():
         connection = zaber.connect(comport=zaber_comport)
         if connection == 0:
             print("Cannot Connect to Zaber comport")
+            self.error("Cannot Connect to Zaber comport")
             return 
         # Futek Load Cell setup
         futek = FUTEKDeviceCLI()
@@ -471,6 +477,12 @@ class MainWindow():
         while True:
             # Check if paused during the loop
             if self.toggle_pause.get() == 1: # TODO: Right here, we call recalibration script
+                zaber.axis.stop()
+                zaber.axis.wait_until_idle()
+                zaber.axis.move_absolute(17, Units.LENGTH_MILLIMETRES)
+                futek.stop()
+                futek.exit()
+                zaber.disconnect()
                 return current_run  # Return same run number to resume from where we left off
             self.root.update()  # Keep GUI responsive
 
@@ -500,6 +512,12 @@ class MainWindow():
         while True:
             # Check if paused during the loop
             if self.toggle_pause.get() == 1: # TODO: Right here, we call recalibration script
+                zaber.axis.stop()
+                zaber.axis.wait_until_idle()
+                zaber.axis.move_absolute(17, Units.LENGTH_MILLIMETRES)
+                futek.stop()
+                futek.exit()
+                zaber.disconnect()
                 return current_run  # Return same run number to resume from where we left off
             self.root.update()  # Keep GUI responsive
 
@@ -556,9 +574,10 @@ class MainWindow():
         workbook.close()
 
         # Pause current run, reset sensor position manually and press enter to go to next run
-        if(current_run != n_runs):
-            zaber.axis.move_relative((Extract-1.8), Units.LENGTH_MILLIMETRES)
-
+        # if(current_run != n_runs):
+            #zaber.axis.move_relative((Extract-1.8), Units.LENGTH_MILLIMETRES)
+        futek.stop()
+        futek.exit()
         zaber.disconnect()
         return int(current_run) + 1
     

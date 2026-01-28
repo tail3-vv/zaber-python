@@ -1,18 +1,13 @@
-import datetime
+import serial.tools.list_ports
 
-# Create a datetime object (e.g., the current date and time)
-now = datetime.datetime.now()
+# Get an iterable of ListPortInfo objects
+ports = serial.tools.list_ports.comports()
 
-# Extract components
-year = str(now.year)[2:]
-month = str(now.month)
-day = str(now.day)
+# Iterate over the list of ports and print their information
+for port in ports:
+    print(f"Device: {port.device}")
+    print(f"Name: {port.name}")
+    print(f"Description: {port.description}")
+    print(f"Hardware ID: {port.hwid}\n")
 
-if len(month) < 2:
-    month = f"0{month}"
-if len(day) < 2:
-    day = f"0{day}"
-# Print the extracted components
-print(f"Year: {year}")
-print(f"Month: {month}")
-print(f"Day: {day}")
+print(f"{len(ports)} ports found")
