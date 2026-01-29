@@ -7,9 +7,9 @@ import time
 import xlsxwriter
 from pathlib import Path
 from datetime import datetime
-from zaber_cli import ZaberCLI
-from futek_cli import FUTEKDeviceCLI
-from zaber_motion import Units
+# from zaber_cli import ZaberCLI
+# from futek_cli import FUTEKDeviceCLI
+# from zaber_motion import Units
 import numpy as np
 
 class MainWindow():
@@ -37,7 +37,9 @@ class MainWindow():
         
         # Comports have default values
         self.zaber_comport = tk.StringVar(value="COM3")
-        self.futek_comport = tk.StringVar(value="COM4")
+
+        # EB, Shear etc.
+        self.test_type = tk.StringVar(value="EB")
 
         """
         These variables control the state of the test ie pauses, stops, recalibrations
@@ -71,11 +73,18 @@ class MainWindow():
     def trace_path(self, *args):
         """ Trace changes to the saved_path variable """
         test_start = self.is_test_started.get()
+        test_type = self.test_type.get()
         if test_start:
-            # Verify widgets disabled and continue testing
+            # Disable widgets
             for w in self.widgets:
-                w.config(state=tk.DISABLED)
-            self._continue_test()
+                    w.config(state=tk.DISABLED)
+
+            if test_type == "EB":
+                self.pause_btn.config(state=tk.NORMAL)
+                self._eb_test()
+            elif  test_type == "Shear":
+                self.pause_btn.config(state=tk.DISABLED)
+                self._shear_test()
         else:
             # Reenable widgets
             for w in self.widgets:
@@ -85,45 +94,41 @@ class MainWindow():
         """ Trace changes to the toggle_pause variable to resume testing when unpaused """
         self.update_pause_btn() # Updates pause button text based on toggle state
 
-    def _continue_test(self):
+    def _shear_test(self):
+        """"""
+        print("shear test started")
+
+    def _eb_test(self):
         """ Helper function to continue test if conditions are met """
-        ### Variables that change based on settings
-        path = self.saved_path.get()
-        sensor = self.sensor_id.get()
-        checkbox = self.is_create_files.get()
-        testStarted = self.is_test_started.get()
+        if not (self.is_test_started.get() and self.toggle_pause.get() == 0):
+            return
+        
         n_runs = self.n_runs.get()
         current_run = self.current_run.get()
-        is_paused = self.toggle_pause.get()
-        is_pause_between_runs = self.is_pause_between_runs.get()
-        zaber_comport = self.zaber_comport.get()
-        futek_comport = self.futek_comport.get()
-        self.update_pause_btn() # Update pause button text
-        pause_flag = False # check if run is paused
-
-        if testStarted and (is_paused == 0):
-            # Run Test function and update textbox according to progress
-            self.update_textbox(f"Beginning run {current_run}")
-            #state = self.test_funct(n_runs, current_run, path, sensor, zaber_comport, futek_comport)
-            state = self.run_tests(n_runs, current_run, zaber_comport)
-
-            if current_run == state: # Run paused mid execution
-                self.update_textbox(f"Run {current_run} was paused")
-                pause_flag = True
-            else:
-                self.update_textbox(f"Run {current_run} completed")
-
-            if current_run == n_runs and pause_flag == False:
-                self.update_textbox(f"All runs complete")
-                self.testing_complete() # Open dialogue
-                self.is_test_started.set(0) # Testing mode is now off
-                self.current_run.set(1) # Run is set back to 1
-            else:
-                self.current_run.set(state) # Increment current run
-
+        
+        # Run Test function and update textbox according to progress
+        self.update_textbox(f"Beginning run {current_run}")
+        state = self.test_funct(n_runs, current_run, self.saved_path.get(), 
+                                self.sensor_id.get(), self.zaber_comport.get())
+        
+        # Check if run was paused or completed
+        is_paused = current_run == state
+        self.update_textbox(f"Run {current_run} was paused" if is_paused 
+                           else f"Run {current_run} completed")
+        
+        # Handle test completion or continue to next run
+        if current_run == n_runs and not is_paused:
+            self.update_textbox(f"All runs complete")
+            self.testing_complete()
+            self.is_test_started.set(0)
+            self.current_run.set(1)
+            self.saved_path.set("")
+            self.sensor_id.set("")
+        else:
+            self.current_run.set(state)
             if state <= n_runs:
-                self.toggle_pause.set(1) # Run is now Paused
-                self.update_pause_btn() # Update pause button text
+                self.toggle_pause.set(1)
+                self.update_pause_btn()
     
     """
     GUI Widgets that remain mostly the same during testing
@@ -183,47 +188,7 @@ class MainWindow():
 
     def begin_test_btn(self):
         """ Opens dialog to verify settings before actually beginning tests """
-        def verify_folderpath():
-            """ 
-            Helper function that makes sure folderpath is correct 
-            and creates new directory paths if not
-            TODO: Create FUT and CAP folder aswell
-            """
-            sensor = self.sensor_id.get()
-            saved_path = self.saved_path.get()
-            if self.is_create_files.get():
-                now = datetime.now()
-
-                # Extract components
-                year = str(now.year)[2:]
-                month = str(now.month)
-                day = str(now.day)
-
-                if len(month) < 2:
-                    month = f"0{month}"
-                if len(day) < 2:
-                    day = f"0{day}"
-                if f"{month} {day} {year}_325mm2_EB" in self.saved_path.get():
-                    # If current day directory is already created
-                    path = Path(f"{saved_path}")
-                elif sensor in saved_path:
-                    # If Sensor directory is already created
-                    path = Path(f"{saved_path}/{month} {day} {year}_325mm2_EB")
-                else:
-                    # If No directory was created
-                    path = Path(f"{saved_path}/{sensor}/{month} {day} {year}_325mm2_EB")
-                # C:/Users/emili/OneDrive/Documents/Projects/VenaVitals/zaber-python
-                try:
-                    path.mkdir(parents=True, exist_ok=True)
-                    self.saved_path.set(path)
-                    self.open_settings()
-                except OSError as e:
-                    self.error(f"Error creating directory {path}: {e}")
-                    print(f"Error creating directory {path}: {e}")
-            else:
-                self.open_settings()
-
-        btn = tk.Button(self.root, text="Begin Test", command=verify_folderpath)
+        btn = tk.Button(self.root, text="Begin Test", command=self.open_settings)
         btn.grid(sticky="w", row=6, column=3)
 
 
@@ -246,7 +211,7 @@ class MainWindow():
             self.toggle_pause.set(1)
         elif self.toggle_pause.get() == 1: # if test is Paused then unpause
             self.toggle_pause.set(0)
-            self._continue_test()
+            self._eb_test()
 
     def update_pause_btn(self, *args):
         """ Updates pause text to be correct """
@@ -278,6 +243,30 @@ class MainWindow():
                            "You cannot move on until all settings are filled in.")
         heading.pack(padx=10, pady=20)
 
+        widgets = [] # store all widgets in here to be disabled if needed
+        
+        def select_test():
+            """ Selection box for the different available tests ie eb, shear """
+            def select(event):
+                selected_item = test_combobox.get()
+                test_combobox.set(selected_item)
+                self.test_type.set(selected_item)
+
+                if selected_item == "Shear":
+                    for w in widgets:
+                        w.config(state=tk.DISABLED)
+                else:
+                    for w in widgets:
+                        w.config(state=tk.NORMAL)
+
+            test_label = tk.Label(settings, text="Test Type:")
+            test_combobox = ttk.Combobox(settings, values=['EB', 'Shear'],
+                                            state='readonly', textvariable=self.test_type)
+            test_combobox.set('EB')
+            test_combobox.bind("<<ComboboxSelected>>", select)
+            test_label.grid(sticky='w', row=2, column=0, padx=10,pady=10)
+            test_combobox.grid(sticky='w', row=2, column=0, padx=125, pady=10)
+
         def enter_num_runs():
             """ 
             Prompt user to enter number of runs during testing 
@@ -287,24 +276,12 @@ class MainWindow():
             runs_entry = tk.Spinbox(settings, from_=1, to=10, textvariable=self.n_runs, width=10)
 
             # Widget positions
-            label.grid(sticky='w', row=2, column=0, padx=10,pady=10)
-            runs_entry.grid(sticky='w', row=2, column=0, padx=125, pady=10)
-
-        def pause_between_checkbox():
-            """ 
-            Checkbox whether the user wants to pause between runs 
-            Default: Checked
-            """
-            checkbox = tk.Checkbutton(settings, text="Pause between Runs?",
-                            variable=self.is_pause_between_runs, command=self.is_pause_between_runs.get())
-            checkbox.grid(sticky="w", row=3, column=0, padx=10)
+            label.grid(sticky='w', row=3, column=0, padx=10,pady=10)
+            runs_entry.grid(sticky='w', row=3, column=0, padx=125, pady=10)
+            widgets.append(runs_entry)
 
         def select_comports():
-            """Selection box for zaber and futek comports"""
-            def zaber_select(event):
-                """When a zaber comport is selected the futek comport gets enabled"""
-                # Enable futek combobox
-                futek_combobox.config(state=tk.NORMAL)
+            """Selection box for zaber comports"""
 
             zaber_label = tk.Label(settings, text="Zaber Comport:")
             zaber_combobox = ttk.Combobox(settings, values=[port.device for port in serial.tools.list_ports.comports()],
@@ -313,31 +290,64 @@ class MainWindow():
 
             zaber_label.grid(sticky='w', row=4, column=0, padx=10,pady=10)
             zaber_combobox.grid(sticky='w', row=4, column=0, padx=125, pady=10)
-            
-            zaber_combobox.bind("<<ComboboxSelected>>", zaber_select)
+            widgets.append(zaber_combobox)
 
-            # Futek
-            futek_label = tk.Label(settings, text="Futek Comport:")
-            futek_combobox = ttk.Combobox(settings, values=[port.device for port in serial.tools.list_ports.comports()],
-                                            state=tk.DISABLED, textvariable=self.futek_comport)
-            futek_combobox.set('Select Comport')
-
-            futek_label.grid(sticky='w', row=5, column=0, padx=10,pady=10)
-            futek_combobox.grid(sticky='w', row=5, column=0, padx=125, pady=10)
+        def pause_between_checkbox():
+            """ 
+            Checkbox whether the user wants to pause between runs 
+            Default: Checked
+            """
+            checkbox = tk.Checkbutton(settings, text="Pause between Runs?",
+                            variable=self.is_pause_between_runs, command=self.is_pause_between_runs.get())
+            checkbox.grid(sticky="w", row=5, column=0, padx=10)
+            widgets.append(checkbox)
 
         def begin_test_btn():
             """ Actually begins testing """
-            # TODO: Make this button disabled until futek comport has been found
             def btn_clicked():
-                settings.grab_release()
-                settings.withdraw()
-                self.pause_btn.config(state=tk.NORMAL)
-                self.is_test_started.set(1)
+                """ 
+                Helper function that determines the correct folder path
+                and creates only necessary directories
+                """
+                sensor = self.sensor_id.get()
+                saved_path = self.saved_path.get()
+                test = self.test_type.get()
+                
+                if self.is_create_files.get():
+                    now = datetime.now()
+
+                    # Extract components with proper formatting
+                    year = str(now.year)[2:]
+                    month = str(now.month).zfill(2)
+                    day = str(now.day).zfill(2)
+                    
+                    # Construct the expected directory structure
+                    date_test_dir = f"{month} {day} {year}_325mm2_{test}"
+                    full_dir_path = Path(saved_path) / sensor / date_test_dir / "FUT"
+                    
+                    try:
+                        # Create directories only if they don't exist (handles partial paths too)
+                        full_dir_path.mkdir(parents=True, exist_ok=True)
+                        
+                        self.saved_path.set(str(full_dir_path))
+                        settings.grab_release()
+                        settings.withdraw()
+                        self.pause_btn.config(state=tk.NORMAL)
+                        self.is_test_started.set(1)
+                    except OSError as e:
+                        self.error(f"Error creating directory {full_dir_path}: {e}")
+                        print(f"Error creating directory {full_dir_path}: {e}")
+                else:
+                    settings.grab_release()
+                    settings.withdraw()
+                    self.pause_btn.config(state=tk.NORMAL)
+                    self.is_test_started.set(1)
     
             btn = tk.Button(settings, text="Begin Test", command=btn_clicked)
             btn.grid(sticky="w", row=6, column=0, padx=215, pady=115)
 
         self.add_separator(y_value=90, window=settings)
+        select_test()
         enter_num_runs()
         pause_between_checkbox()
         select_comports()
@@ -372,7 +382,7 @@ class MainWindow():
         # Create a new top-level window
         complete = tk.Toplevel(self.root)
         complete.title("Testing complete")
-        complete.geometry("700x150") 
+        complete.geometry("650x150") 
         complete.resizable(False, False)
         # Disable interaction with main window
         complete.grab_set()
@@ -401,24 +411,24 @@ class MainWindow():
         test_btn.grid(sticky='w', row=2, column=2, padx=5, pady=30)
         analysis_btn.grid(sticky='w', row=2, column=3, columnspan=2, padx=5, pady=30)
 
-    def test_funct(self, n_runs, current_run, folder_path, sensor, zaber_comport, futek_comport):
+    def test_funct(self, n_runs, current_run, folder_path, sensor, zaber_comport):
         # Create a datetime object (e.g., the current date and time)
         path = Path(self.saved_path.get())
         file_name = "Run " + str(current_run) + ".xlsx" # create file name
         path = path / file_name
         force_readings = [1, 11, 213123, 1232, 121221]
-        # workbook = xlsxwriter.Workbook(path)
-        # worksheet = workbook.add_worksheet(str(current_run))
+        workbook = xlsxwriter.Workbook(path)
+        worksheet = workbook.add_worksheet(str(current_run))
         
-        # worksheet.write('A1', 'Index')
-        # worksheet.write('B1', 'Load Cell')
-        # for index in range(len(force_readings)):
-        #     worksheet.write(index+1, 0, index + 1)
-        #     worksheet.write(index+1, 1, force_readings[index])
-        # workbook.close()
+        worksheet.write('A1', 'Index')
+        worksheet.write('B1', 'Load Cell')
+        for index in range(len(force_readings)):
+            worksheet.write(index+1, 0, index + 1)
+            worksheet.write(index+1, 1, force_readings[index])
+        workbook.close()
         
         if current_run < n_runs:
-            for i in range(1):
+            for i in range(10):
                 # Check if paused during the loop
                 if self.toggle_pause.get() == 1: # TODO: Right here, we call recalibration script
                     return current_run # Return same run number to resume from where we left off
@@ -426,7 +436,7 @@ class MainWindow():
                 self.root.update()  # Keep GUI responsive
             return int(current_run) + 1
         elif current_run == n_runs:
-            for i in range(1):
+            for i in range(10):
                 # Check if paused during the loop
                 if self.toggle_pause.get() == 1:  # TODO: Right here, we call recalibration script
                     return current_run # Return same run number to resume from where we left off
