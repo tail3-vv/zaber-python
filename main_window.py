@@ -10,6 +10,7 @@ from datetime import datetime
 # from futek_cli import FUTEKDeviceCLI
 # from zaber_motion import Units
 from settings_window import SettingsWindow
+from shear_window import ShearWindow
 import numpy as np
 class MainWindow():
     def __init__(self):
@@ -96,7 +97,7 @@ class MainWindow():
 
     def _shear_test(self):
         """"""
-        print("shear test started")
+        shear_window = ShearWindow(self.root, self)
 
     def _eb_test(self):
         """ Helper function to continue test if conditions are met """
@@ -119,17 +120,21 @@ class MainWindow():
         # Handle test completion or continue to next run
         if current_run == n_runs and not is_paused:
             self.update_textbox(f"All runs complete")
-            self.testing_complete()
-            self.is_test_started.set(0)
-            self.current_run.set(1)
-            self.saved_path.set("")
-            self.sensor_id.set("")
+            self._end_testing()
         else:
             self.current_run.set(state)
             if state <= n_runs:
                 self.toggle_pause.set(1)
                 self.update_pause_btn()
     
+    def _end_testing(self):
+        """ End Testing and reset variables """
+        self.testing_complete()
+        self.is_test_started.set(0)
+        self.current_run.set(1)
+        self.saved_path.set("")
+        self.sensor_id.set("")
+
     """
     GUI Widgets that remain mostly the same during testing
     """
