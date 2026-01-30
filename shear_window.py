@@ -11,7 +11,8 @@ import numpy as np
 import time
 from datetime import datetime
 #from futek_cli import FUTEKDeviceCLI
-
+from pathlib import Path
+import xlsxwriter
 """
 Window for Shear testing live graph
 TODO: Add option to stop and save the graph
@@ -28,8 +29,8 @@ class ShearWindow(tk.Toplevel):
         self.fig = Figure(figsize=(5, 4), dpi=100)
         self.ax = self.fig.add_subplot(111)
         self.line, = self.ax.plot([], [], 'r-', lw=2)
-        self.ax.set_xlim(0, 100)
-        self.ax.set_ylim(-1.5, 1.5)
+        self.ax.set_xlim(left=0, right=10)  # Set initial right limit, will autoscale
+        self.ax.set_ylim(-0.5, 2)
         self.ax.set_xlabel("Time Elapsed (seconds)")
         self.ax.set_ylabel("Force (N)")
         
@@ -39,8 +40,6 @@ class ShearWindow(tk.Toplevel):
             seconds = int(x % 60)
             return f"{minutes}:{seconds:02d}"
         self.ax.xaxis.set_major_formatter(ticker.FuncFormatter(format_time))
-        
-        self.indices = []
 
         # This connects Matplotlib and tkinter together
         self.canvas = FigureCanvasTkAgg(self.fig, master=self)
@@ -72,6 +71,7 @@ class ShearWindow(tk.Toplevel):
         # Find Current Time
         self.init_time = datetime.now()
         self.time_readings = []
+        self.date_readings = []
         # Starts graphing animation
         # Storing in 'self.anim' prevents garbage collection
         self.anim = FuncAnimation(self.fig, self.update_plot, interval=50, blit=False)
@@ -86,34 +86,60 @@ class ShearWindow(tk.Toplevel):
         Y-Axis: Output of load cell in Newtons
         X-Axis: Time Elapsed
         """
-        # TODO: Make this actual time not indices
-        current_indice = len(self.indices)
-        self.indices.append(current_indice)
         
         current_time = datetime.now()
+        date_string = f'{current_time:%Y-%m-%d %H:%M:%S}'
+        self.date_readings.append(date_string)
         elapsed_time = (current_time - self.init_time).total_seconds()
         self.time_readings.append(elapsed_time)
         # Read force values on load cell
         reading_force = 0#self.futek.getNormalData() 
-       # reading_force = reading_force * (-4.44822) # convert pounds to Newtons and change polarity
+       #reading_force = reading_force * (-4.44822) # convert pounds to Newtons and change polarity
         stage_force = reading_force - self.init_val
 
         # Append force readings to y axis
         #self.force_readings[current_time] = stage_force
         self.force_readings.append(stage_force)
 
-        if len(self.time_readings) > 100:
-            self.ax.set_xlim(self.time_readings[-100], self.time_readings[-1])
-            
+        # Update line data
         self.line.set_data(self.time_readings, self.force_readings)
+        
+        # Recalculate data limits and autoscale
+        self.ax.relim()
+        self.ax.autoscale_view(scalex=True, scaley=True)
+
         return self.line,
 
     def save(self):
         """ Save plot aswell and related tables """
-        pass
+        save_path = self.main_window.saved_path.get()
+        sensor_id = self.main_window.sensor_id.get()
+        save_path = Path(save_path)
+        self.fig.savefig(f'{save_path.parent}/Raw Fig_Shearing.png')
+
+        date = datetime.now()
+        am_pm = date.strftime('%p')
+        filename = f"Live Graph_{date.month}-{date.day}-{date.year}_{date.hour}-{date.minute}-{date.second}-{am_pm}.xlsx"
+        workbook = xlsxwriter.Workbook(save_path / filename)
+        worksheet = workbook.add_worksheet(f"{sensor_id}")
+
+        # Create Column headers
+        worksheet.write('A1', 'Sample Number')
+        worksheet.write('B1', 'Tracking Value')
+        worksheet.write('C1', 'Date')
+        worksheet.write('D1', 'Time Elapsed')
+
+        for index in range(len(self.force_readings)):
+            worksheet.write(index+1, 0, index + 1)
+            worksheet.write(index+1, 1, self.force_readings[index])
+            worksheet.write(index+1, 2, self.date_readings[index])
+            worksheet.write(index+1, 3, self.time_readings[index])
+        
+        workbook.close()
     
     def on_close(self):
         print("saving and closing")
+        self.save()
        # self.futek.stop()
        # self.futek.exit()
         self.main_window._end_testing()

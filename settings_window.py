@@ -24,7 +24,11 @@ class SettingsWindow(tk.Toplevel):
         self._create_pause_checkbox()
         self._create_comport_selection()
         self._add_separator(y_value=250)
+        self._create_SA_inputbox()
         self._create_begin_button()
+
+        # Change sa box defaults based on choice for test type
+        self.sa_box = None
     
     def _create_heading(self):
         """Create the heading frame and label"""
@@ -46,6 +50,9 @@ class SettingsWindow(tk.Toplevel):
             if selected_item == "Shear":
                 for w in self.widgets:
                     w.config(state=tk.DISABLED)
+                
+                self.main_window.surface_area.set("50.27")
+                #self.sa_box.insert("50.27")
             else:
                 for w in self.widgets:
                     w.config(state=tk.NORMAL)
@@ -77,20 +84,30 @@ class SettingsWindow(tk.Toplevel):
         zaber_label.grid(sticky='w', row=4, column=0, padx=10, pady=10)
         zaber_combobox.grid(sticky='w', row=4, column=0, padx=125, pady=10)
         self.widgets.append(zaber_combobox)
-    
+
     def _create_pause_checkbox(self):
         """Checkbox for pausing between runs"""
         checkbox = tk.Checkbutton(self, text="Pause between Runs?",
                                   variable=self.main_window.is_pause_between_runs,
                                   command=self.main_window.is_pause_between_runs.get())
-        checkbox.grid(sticky="w", row=5, column=0, padx=10)
+        checkbox.grid(sticky="w", row=6, column=0, padx=10)
         self.widgets.append(checkbox)
     
+    def _create_SA_inputbox(self):
+        # Widget Labels
+        label = tk.Label(self, text="Surface Area: ")
+        self.sa_box = tk.Entry(self, textvariable=self.main_window.surface_area, width=15)
+
+        # Widget positions
+        label.grid(sticky='w', row=7, column=0, padx=10, pady=20)
+        self.sa_box.grid(sticky='w', row=7, column=0, padx=125, pady=20)
+
     def _create_begin_button(self):
         """Button to begin the test"""
         def on_begin_clicked():
             sensor = self.main_window.sensor_id.get()
             saved_path = self.main_window.saved_path.get()
+            surface_area = self.main_window.surface_area.get()
             test = self.main_window.test_type.get()
             
             if self.main_window.is_create_files.get():
@@ -99,21 +116,22 @@ class SettingsWindow(tk.Toplevel):
                 month = str(now.month).zfill(2)
                 day = str(now.day).zfill(2)
                 
-                date_test_dir = f"{month} {day} {year}_325mm2_{test}"
-                full_dir_path = Path(saved_path) / sensor / date_test_dir / "FUT"
-                
+                date_test_dir = f"{month} {day} {year}_{surface_area}_{test}"
+                full_dir_path_fut = Path(saved_path) / sensor / date_test_dir / "FUT"
+                full_dir_path_cap = Path(saved_path) / sensor / date_test_dir / "CAP"
                 try:
-                    full_dir_path.mkdir(parents=True, exist_ok=True)
-                    self.main_window.saved_path.set(str(full_dir_path))
+                    full_dir_path_cap.mkdir(parents=True, exist_ok=True)
+                    full_dir_path_fut.mkdir(parents=True, exist_ok=True)
+                    self.main_window.saved_path.set(str(full_dir_path_fut))
                     self._close_and_start()
                 except OSError as e:
-                    self.main_window.error(f"Error creating directory {full_dir_path}: {e}")
-                    print(f"Error creating directory {full_dir_path}: {e}")
+                    self.main_window.error(f"Error creating directory {full_dir_path_fut}: {e}")
+                    print(f"Error creating directory {full_dir_path_fut}: {e}")
             else:
                 self._close_and_start()
         
         btn = tk.Button(self, text="Begin Test", command=on_begin_clicked)
-        btn.grid(sticky="w", row=6, column=0, padx=215, pady=115)
+        btn.grid(sticky="w", row=8, column=0, padx=215, pady=50)
     
     def _close_and_start(self):
         """Close dialog and start the test"""

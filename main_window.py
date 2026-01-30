@@ -41,6 +41,9 @@ class MainWindow():
         # EB, Shear etc.
         self.test_type = tk.StringVar(value="EB")
 
+        # surface area of eco block ie 325mm2, 50.27, etc.
+        self.surface_area = tk.StringVar(value="325mm2")
+
         """
         These variables control the state of the test ie pauses, stops, recalibrations
         """
