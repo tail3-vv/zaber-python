@@ -1,13 +1,15 @@
-import serial.tools.list_ports
+import tkinter as tk
+from shear_window import ShearWindow
 
-# Get an iterable of ListPortInfo objects
-ports = serial.tools.list_ports.comports()
+def launch_graph():
+    # We pass 'root' to the class so it knows who its parent is
+    window = ShearWindow(root)
 
-# Iterate over the list of ports and print their information
-for port in ports:
-    print(f"Device: {port.device}")
-    print(f"Name: {port.name}")
-    print(f"Description: {port.description}")
-    print(f"Hardware ID: {port.hwid}\n")
+root = tk.Tk()
+root.title("Main Dashboard")
+root.geometry("300x200")
 
-print(f"{len(ports)} ports found")
+btn = tk.Button(root, text="Open Live Graph", command=launch_graph)
+btn.pack(pady=50, padx=50)
+
+root.mainloop()

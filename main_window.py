@@ -2,7 +2,6 @@ import tkinter as tk
 from tkinter import Tk
 from tkinter import ttk
 from tkinter import filedialog as fd
-import serial.tools.list_ports
 import time
 import xlsxwriter
 from pathlib import Path
@@ -10,8 +9,8 @@ from datetime import datetime
 # from zaber_cli import ZaberCLI
 # from futek_cli import FUTEKDeviceCLI
 # from zaber_motion import Units
+from settings_window import SettingsWindow
 import numpy as np
-
 class MainWindow():
     def __init__(self):
         self.root = Tk(screenName=None, baseName=None, className='Tk', useTk=1)
@@ -64,13 +63,14 @@ class MainWindow():
         self.textbox = textbox
     
     def update_textbox(self, text):
+        """ Helper function to change the text in the updates textbox """
         self.textbox.config(state=tk.NORMAL)
         self.textbox.insert(tk.END, f"{text}\n")
         self.textbox.config( state=tk.DISABLED)
 
     # *args is necessary for the trace() funct
     # TODO: Possibly make separate trace functions for pause run and continuous run
-    def trace_path(self, *args):
+    def trace_test(self, *args):
         """ Trace changes to the saved_path variable """
         test_start = self.is_test_started.get()
         test_type = self.test_type.get()
@@ -220,139 +220,9 @@ class MainWindow():
         else: # Test is Paused
             self.pause_btn.config(text="Unpause Run")
 
-    """
-    Settings Dialogue where the user can manipulate the various testing conditions
-    """
     def open_settings(self):
-        """
-        Opens a secondary window to verify settings before beginning tests
-        """
-        # Create a new top-level window
-        settings = tk.Toplevel(self.root)
-        settings.title("Verify Settings")
-        settings.geometry("300x400") 
-        settings.resizable(False, False)
-        # Disable interaction with main window
-        settings.grab_set()
-
-        # Heading
-        heading_frame = tk.Frame(settings, width=300, height=50)
-        heading_frame.grid(sticky='w', row=1, pady=10)
-        heading = tk.Label(heading_frame, 
-                           text="Verify settings before beginning tests. \n" \
-                           "You cannot move on until all settings are filled in.")
-        heading.pack(padx=10, pady=20)
-
-        widgets = [] # store all widgets in here to be disabled if needed
-        
-        def select_test():
-            """ Selection box for the different available tests ie eb, shear """
-            def select(event):
-                selected_item = test_combobox.get()
-                test_combobox.set(selected_item)
-                self.test_type.set(selected_item)
-
-                if selected_item == "Shear":
-                    for w in widgets:
-                        w.config(state=tk.DISABLED)
-                else:
-                    for w in widgets:
-                        w.config(state=tk.NORMAL)
-
-            test_label = tk.Label(settings, text="Test Type:")
-            test_combobox = ttk.Combobox(settings, values=['EB', 'Shear'],
-                                            state='readonly', textvariable=self.test_type)
-            test_combobox.set('EB')
-            test_combobox.bind("<<ComboboxSelected>>", select)
-            test_label.grid(sticky='w', row=2, column=0, padx=10,pady=10)
-            test_combobox.grid(sticky='w', row=2, column=0, padx=125, pady=10)
-
-        def enter_num_runs():
-            """ 
-            Prompt user to enter number of runs during testing 
-            Default: 3 runs
-            """
-            label = tk.Label(settings, text="Number of Runs:")
-            runs_entry = tk.Spinbox(settings, from_=1, to=10, textvariable=self.n_runs, width=10)
-
-            # Widget positions
-            label.grid(sticky='w', row=3, column=0, padx=10,pady=10)
-            runs_entry.grid(sticky='w', row=3, column=0, padx=125, pady=10)
-            widgets.append(runs_entry)
-
-        def select_comports():
-            """Selection box for zaber comports"""
-
-            zaber_label = tk.Label(settings, text="Zaber Comport:")
-            zaber_combobox = ttk.Combobox(settings, values=[port.device for port in serial.tools.list_ports.comports()],
-                                            state='readonly', textvariable=self.zaber_comport)
-            zaber_combobox.set('Select Comport')
-
-            zaber_label.grid(sticky='w', row=4, column=0, padx=10,pady=10)
-            zaber_combobox.grid(sticky='w', row=4, column=0, padx=125, pady=10)
-            widgets.append(zaber_combobox)
-
-        def pause_between_checkbox():
-            """ 
-            Checkbox whether the user wants to pause between runs 
-            Default: Checked
-            """
-            checkbox = tk.Checkbutton(settings, text="Pause between Runs?",
-                            variable=self.is_pause_between_runs, command=self.is_pause_between_runs.get())
-            checkbox.grid(sticky="w", row=5, column=0, padx=10)
-            widgets.append(checkbox)
-
-        def begin_test_btn():
-            """ Actually begins testing """
-            def btn_clicked():
-                """ 
-                Helper function that determines the correct folder path
-                and creates only necessary directories
-                """
-                sensor = self.sensor_id.get()
-                saved_path = self.saved_path.get()
-                test = self.test_type.get()
-                
-                if self.is_create_files.get():
-                    now = datetime.now()
-
-                    # Extract components with proper formatting
-                    year = str(now.year)[2:]
-                    month = str(now.month).zfill(2)
-                    day = str(now.day).zfill(2)
-                    
-                    # Construct the expected directory structure
-                    date_test_dir = f"{month} {day} {year}_325mm2_{test}"
-                    full_dir_path = Path(saved_path) / sensor / date_test_dir / "FUT"
-                    
-                    try:
-                        # Create directories only if they don't exist (handles partial paths too)
-                        full_dir_path.mkdir(parents=True, exist_ok=True)
-                        
-                        self.saved_path.set(str(full_dir_path))
-                        settings.grab_release()
-                        settings.withdraw()
-                        self.pause_btn.config(state=tk.NORMAL)
-                        self.is_test_started.set(1)
-                    except OSError as e:
-                        self.error(f"Error creating directory {full_dir_path}: {e}")
-                        print(f"Error creating directory {full_dir_path}: {e}")
-                else:
-                    settings.grab_release()
-                    settings.withdraw()
-                    self.pause_btn.config(state=tk.NORMAL)
-                    self.is_test_started.set(1)
-    
-            btn = tk.Button(settings, text="Begin Test", command=btn_clicked)
-            btn.grid(sticky="w", row=6, column=0, padx=215, pady=115)
-
-        self.add_separator(y_value=90, window=settings)
-        select_test()
-        enter_num_runs()
-        pause_between_checkbox()
-        select_comports()
-        self.add_separator(y_value=250, window=settings)
-        begin_test_btn()
+        """Opens a settings dialog window for test configuration"""
+        SettingsWindow(self.root, self)
 
     """
     Dialogue(s) pop ups: Error, test complete, confirmations, etc.
@@ -601,7 +471,7 @@ def run():
     main.begin_test_btn()
     main.create_pause_btn()
 
-    main.is_test_started.trace('w', main.trace_path)
+    main.is_test_started.trace('w', main.trace_test)
     main.toggle_pause.trace('w', main.trace_pause)
 
     main.root.mainloop()
