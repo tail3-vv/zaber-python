@@ -8,9 +8,8 @@ from matplotlib.backends.backend_tkagg import (FigureCanvasTkAgg, NavigationTool
 from matplotlib.figure import Figure
 from matplotlib.animation import FuncAnimation
 import numpy as np
-import time
 from datetime import datetime
-from futek_cli import FUTEKDeviceCLI
+# from futek_cli import FUTEKDeviceCLI
 from pathlib import Path
 import xlsxwriter
 """
@@ -62,8 +61,8 @@ class ShearWindow(tk.Toplevel):
 
 
         # Initialize Load Cell and read initial values
-        self.futek = FUTEKDeviceCLI()
-        reading_force = self.futek.getNormalData() 
+        # self.futek = FUTEKDeviceCLI()
+        reading_force = 0 # self.futek.getNormalData() 
         #reading_force = reading_force * (-4.44822) # convert pounds to Newtons and change polarity
         self.init_val = reading_force 
         self.init_force = 0
@@ -94,7 +93,7 @@ class ShearWindow(tk.Toplevel):
         elapsed_time = (current_time - self.init_time).total_seconds()
         self.time_readings.append(elapsed_time)
         # Read force values on load cell
-        reading_force = self.futek.getNormalData() 
+        reading_force = 0 # self.futek.getNormalData() 
        #reading_force = reading_force * (-4.44822) # convert pounds to Newtons and change polarity
         stage_force = reading_force - self.init_val
 
@@ -142,8 +141,8 @@ class ShearWindow(tk.Toplevel):
     def on_close(self):
         print("saving and closing")
         self.save()
-        self.futek.stop()
-        self.futek.exit()
+        # self.futek.stop()
+        # self.futek.exit()
         self.main_window._end_testing()
         self.anim.event_source.stop()
         self.destroy()

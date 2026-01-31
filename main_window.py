@@ -11,8 +11,9 @@ from datetime import datetime
 # from zaber_motion import Units
 from settings_window import SettingsWindow
 from shear_window import ShearWindow
+from analysis_window import AnalysisWindow
 import numpy as np
-class MainWindow():
+class MainWindow(tk.Frame):
     def __init__(self):
         self.root = Tk(screenName=None, baseName=None, className='Tk', useTk=1)
         self.root.title("Zaber Control Stage")
@@ -52,6 +53,8 @@ class MainWindow():
         self.toggle_pause = tk.IntVar(value=0) # this is boolean, paused=1, not paused=0
         self.widgets = [] # when testing starts, these widgets will all get disabled
 
+        self._create_widgets()
+
 
     def display_updates(self):
         """ Display updates about current run progress """
@@ -61,7 +64,7 @@ class MainWindow():
                           borderwidth=5,
                           relief='groove'
                           )
-        textbox.grid(sticky='w', row=0, column=0, rowspan=1, 
+        textbox.grid(sticky='w', row=1, column=0, rowspan=1, 
                      columnspan=3, padx=10, pady=20)
         textbox.config(state=tk.DISABLED)
         self.textbox = textbox
@@ -141,6 +144,19 @@ class MainWindow():
     """
     GUI Widgets that remain mostly the same during testing
     """
+    def navbar(self):
+        def open_analysis():
+            analysis = AnalysisWindow(self.root, self)
+        frame = tk.Frame(self.root, bg="lightblue", width=625, height=100, bd=3, relief=tk.RIDGE)
+        frame.grid(sticky='ew', row=0, column=0, columnspan=4, rowspan=1)
+        self.root.grid_rowconfigure(0, weight=1)
+
+        # Navigation buttons
+        main_btn = tk.Button(self.root, text='Analysis', command=open_analysis)
+
+        # Layout
+        main_btn.grid(sticky='w', row=0, column=0)
+        
     def select_folder(self):
         """ Prompt user for save folder """
         def open_folder():
@@ -159,9 +175,9 @@ class MainWindow():
         folder_entry = tk.Entry(self.root, textvariable=self.saved_path, width=50)
 
         # Widget positions
-        label.grid(sticky='w', row=1, column=0, padx=10,pady=10)
-        folder_entry.grid(sticky='w', row=1, column=1, pady=10)
-        open_button.grid(sticky='w', row=1, column=2, padx=10,pady=10)
+        label.grid(sticky='w', row=2, column=0, padx=10,pady=10)
+        folder_entry.grid(sticky='w', row=2, column=1, pady=10)
+        open_button.grid(sticky='w', row=2, column=2, padx=10,pady=10)
 
         # Add Widgets to list
         self.widgets.append(folder_entry)
@@ -174,8 +190,8 @@ class MainWindow():
         sensor_entry = tk.Entry(self.root, textvariable=self.sensor_id, width=50)
 
         # Widget positions
-        label.grid(sticky='w', row=2, column=0, padx=10,pady=10)
-        sensor_entry.grid(sticky='w', row=2, column=1, pady=10)
+        label.grid(sticky='w', row=3, column=0, padx=10,pady=10)
+        sensor_entry.grid(sticky='w', row=3, column=1, pady=10)
 
         # Add Widgets to list
         self.widgets.append(sensor_entry)
@@ -468,19 +484,19 @@ class MainWindow():
         futek.exit()
         zaber.disconnect()
         return int(current_run) + 1
-    
-def run():
-    main = MainWindow()
-    main.display_updates()
-    main.select_folder()
-    main.enter_sensor_id()
-    main.add_separator(y_value=310, window=main.root) # about every 50 px is a row
-    main.create_files_checkbox()
-    main.begin_test_btn()
-    main.create_pause_btn()
 
-    main.is_test_started.trace('w', main.trace_test)
-    main.toggle_pause.trace('w', main.trace_pause)
+    def _create_widgets(self):
+        self.display_updates()
+        self.select_folder()
+        self.enter_sensor_id()
+        self.add_separator(y_value=310, window=self.root) # about every 50 px is a row
+        self.create_files_checkbox()
+        self.begin_test_btn()
+        self.create_pause_btn()
+        self.navbar()
 
-    main.root.mainloop()
-run()
+        self.is_test_started.trace('w', self.trace_test)
+        self.toggle_pause.trace('w', self.trace_pause)
+
+main = MainWindow()
+main.root.mainloop()
