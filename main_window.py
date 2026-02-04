@@ -2,6 +2,7 @@ import tkinter as tk
 from tkinter import Tk
 from tkinter import ttk
 from tkinter import filedialog as fd
+import numpy as np
 import time
 import xlsxwriter
 from pathlib import Path
@@ -12,7 +13,7 @@ from datetime import datetime
 from settings_window import SettingsWindow
 from shear_window import ShearWindow
 from analysis_window import AnalysisWindow
-import numpy as np
+
 class MainWindow(tk.Frame):
     def __init__(self):
         self.root = Tk(screenName=None, baseName=None, className='Tk', useTk=1)
@@ -50,7 +51,8 @@ class MainWindow(tk.Frame):
         """
         self.textbox = None
         self.pause_btn = None
-        self.toggle_pause = tk.IntVar(value=0) # this is boolean, paused=1, not paused=0
+        self.toggle_pause = tk.BooleanVar(value=0) # this is boolean, paused=1, not paused=0
+        self.is_warning_cancel = tk.BooleanVar(value=0) # this is for pause warning currently during EB test
         self.widgets = [] # when testing starts, these widgets will all get disabled
 
         self._create_widgets()
@@ -266,6 +268,48 @@ class MainWindow(tk.Frame):
         heading = tk.Label(heading_frame, 
                            text=f"{text}")
         heading.pack(padx=20, pady=20)
+
+    def warning(self, text):
+        def on_close():
+            self.is_warning_cancel.set(0) # redundent, but useful for debugging
+            warn.grab_release()
+            warn.destroy()
+
+        def on_cancel():
+            self.is_warning_cancel.set(1)
+            warn.grab_release()
+            warn.destroy()
+
+        # Create a new top-level window
+        warn = tk.Toplevel(self.root)
+        warn.title("Warning")
+        warn.geometry("600x200") 
+        warn.resizable(False, False)
+        # Disable interaction with main window
+        warn.grab_set()
+        warn.protocol("WM_DELETE_WINDOW", on_close)
+
+        # Heading
+        heading_frame = tk.Frame(warn, width=300, height=50)
+        heading_frame.grid(sticky='w', row=0, column=0, pady=10)
+        heading = tk.Label(heading_frame, 
+                           text=f"{text}")
+        heading.pack(padx=20, pady=20)
+
+        # Buttons
+        exit_btn = tk.Button(warn, text="Ok", 
+                             command=on_close, 
+                             width=10, height=1)
+        
+        cancel_btn = tk.Button(warn, text="Cancel", 
+                             command=on_cancel, 
+                             width=10, height=1)
+        
+        exit_btn.grid(sticky='w', row=1, column=1, pady=65)
+        cancel_btn.grid(sticky='w', row=1, column=0, padx=10, pady=65)
+        self.add_separator(y_value=120, window=warn)
+        # Pause main thread until action is done 
+        self.root.wait_window(warn) 
     
     def testing_complete(self):
         def new_test(*args):
@@ -325,7 +369,11 @@ class MainWindow(tk.Frame):
             for i in range(10):
                 # Check if paused during the loop
                 if self.toggle_pause.get() == 1: # TODO: Right here, we call recalibration script
-                    return current_run # Return same run number to resume from where we left off
+                    self.warning("Warning: Pausing this run will recalibrate the zaber machine and reset the current run.")
+                    
+                    if self.is_warning_cancel.get() == 0:
+                        return current_run # Return same run number to resume from where we left off
+                    self.toggle_pause.set(0)
                 time.sleep(1)
                 self.root.update()  # Keep GUI responsive
             return int(current_run) + 1
@@ -381,13 +429,17 @@ class MainWindow(tk.Frame):
         while True:
             # Check if paused during the loop
             if self.toggle_pause.get() == 1: # TODO: Right here, we call recalibration script
-                zaber.axis.stop()
-                zaber.axis.wait_until_idle()
-                zaber.axis.move_absolute(17, Units.LENGTH_MILLIMETRES)
-                futek.stop()
-                futek.exit()
-                zaber.disconnect()
-                return current_run  # Return same run number to resume from where we left off
+                self.warning("Warning: Pausing this run will recalibrate the zaber machine and reset the current run.")
+                
+                if self.is_warning_cancel.get() == 0: # User pressed OK
+                    zaber.axis.stop()
+                    zaber.axis.wait_until_idle()
+                    zaber.axis.move_absolute(17, Units.LENGTH_MILLIMETRES)
+                    futek.stop()
+                    futek.exit()
+                    zaber.disconnect()
+                    return current_run  # Return same run number to resume from where we left off
+                self.toggle_pause.set(0) # User pressed Cancel
             self.root.update()  # Keep GUI responsive
 
             reading_force = futek.getNormalData() # Read force value
@@ -416,13 +468,17 @@ class MainWindow(tk.Frame):
         while True:
             # Check if paused during the loop
             if self.toggle_pause.get() == 1: # TODO: Right here, we call recalibration script
-                zaber.axis.stop()
-                zaber.axis.wait_until_idle()
-                zaber.axis.move_absolute(17, Units.LENGTH_MILLIMETRES)
-                futek.stop()
-                futek.exit()
-                zaber.disconnect()
-                return current_run  # Return same run number to resume from where we left off
+                self.warning("Warning: Pausing this run will recalibrate the zaber machine and reset the current run.")
+                
+                if self.is_warning_cancel.get() == 0:
+                    zaber.axis.stop()
+                    zaber.axis.wait_until_idle()
+                    zaber.axis.move_absolute(17, Units.LENGTH_MILLIMETRES)
+                    futek.stop()
+                    futek.exit()
+                    zaber.disconnect()
+                    return current_run  # Return same run number to resume from where we left off
+                self.toggle_pause.set(0)
             self.root.update()  # Keep GUI responsive
 
             reading_force = futek.getNormalData()
@@ -493,7 +549,7 @@ class MainWindow(tk.Frame):
         self.create_files_checkbox()
         self.begin_test_btn()
         self.create_pause_btn()
-        self.navbar()
+        # self.navbar()
 
         self.is_test_started.trace('w', self.trace_test)
         self.toggle_pause.trace('w', self.trace_pause)
