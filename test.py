@@ -1,23 +1,15 @@
-# import tkinter as tk
-# from shear_window import ShearWindow
+from eb_analysis import Analysis
 
+sensor_id = 12345
+path = rf'C:/Users/emili/OneDrive/Documents/Projects/VenaVitals/zaber-python/12345/02 02 26_325mm2_EB'
+sensor_type = 3
 
-# class TestWindow():
-#     def __init__(self):
-#         self.root = tk.Tk()
-#         self.root.title("Main Dashboard")
-#         self.root.geometry("300x200")
+# Create analysis instance
+analysis = Analysis(path, sensor_id, sensor_type)
 
-#         btn = tk.Button(self.root, text="Open Live Graph", command=self.launch_graph)
-#         btn.pack(pady=50, padx=50)
+# Get results
+result = analysis.save_data()
 
-#         self.root.mainloop()
-    
-#     def launch_graph(self):
-#         # We pass 'root' to the class so it knows who its parent is
-#         window = ShearWindow(self.root, self)
-    
-#     def _end_testing(self):
-#         pass
-
-# test =TestWindow()
+# Print a sample result
+print(f"Mean Max kPa: {result['mean_max_kpa']}")
+print(f"COV Max kPa: {result['cov_max_kpa']}")
