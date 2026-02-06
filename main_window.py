@@ -13,7 +13,7 @@ from datetime import datetime
 from settings_window import SettingsWindow
 from shear_window import ShearWindow
 from analysis_window import AnalysisWindow
-
+from eb_analysis import Analysis
 class MainWindow(tk.Frame):
     def __init__(self):
         self.root = Tk(screenName=None, baseName=None, className='Tk', useTk=1)
@@ -316,7 +316,9 @@ class MainWindow(tk.Frame):
             """Helper function to go back to testing window"""
             complete.grab_release()
             complete.withdraw()
-
+        def perform_analysis(*args):
+            """Runs analysis in a separate script"""
+            analysis = Analysis(self.saved_path.get(), self.sensor_id.get(), sensor_type=3)
         # Create a new top-level window
         complete = tk.Toplevel(self.root)
         complete.title("Testing complete")
@@ -340,9 +342,8 @@ class MainWindow(tk.Frame):
         test_btn = tk.Button(complete, text="New Test", 
                              command=new_test, 
                              width=10, height=1)
-        # TODO: Create analysis function
         analysis_btn = tk.Button(complete, text="Perform Analysis", 
-                             command=new_test, 
+                             command=perform_analysis, 
                              width=18, height=1)
         # Button arrangment
         exit_btn.grid(sticky='w', row=2, column=1, padx=5, pady=30)
@@ -351,22 +352,22 @@ class MainWindow(tk.Frame):
 
     def test_funct(self, n_runs, current_run, folder_path, sensor, zaber_comport):
         # Create a datetime object (e.g., the current date and time)
-        path = Path(self.saved_path.get())
-        file_name = "Run " + str(current_run) + ".xlsx" # create file name
-        path = path / file_name
-        force_readings = [1, 11, 213123, 1232, 121221]
-        workbook = xlsxwriter.Workbook(path)
-        worksheet = workbook.add_worksheet(str(current_run))
+        # path = Path(self.saved_path.get())
+        # file_name = "Run " + str(current_run) + ".xlsx" # create file name
+        # path = path / file_name
+        # force_readings = [1, 11, 213123, 1232, 121221]
+        # workbook = xlsxwriter.Workbook(path)
+        # worksheet = workbook.add_worksheet(str(current_run))
         
-        worksheet.write('A1', 'Index')
-        worksheet.write('B1', 'Load Cell')
-        for index in range(len(force_readings)):
-            worksheet.write(index+1, 0, index + 1)
-            worksheet.write(index+1, 1, force_readings[index])
-        workbook.close()
+        # worksheet.write('A1', 'Index')
+        # worksheet.write('B1', 'Load Cell')
+        # for index in range(len(force_readings)):
+        #     worksheet.write(index+1, 0, index + 1)
+        #     worksheet.write(index+1, 1, force_readings[index])
+        # workbook.close()
         
         if current_run < n_runs:
-            for i in range(10):
+            for i in range(1):
                 # Check if paused during the loop
                 if self.toggle_pause.get() == 1: # TODO: Right here, we call recalibration script
                     self.warning("Warning: Pausing this run will recalibrate the zaber machine and reset the current run.")
@@ -378,7 +379,7 @@ class MainWindow(tk.Frame):
                 self.root.update()  # Keep GUI responsive
             return int(current_run) + 1
         elif current_run == n_runs:
-            for i in range(10):
+            for i in range(1):
                 # Check if paused during the loop
                 if self.toggle_pause.get() == 1:  # TODO: Right here, we call recalibration script
                     return current_run # Return same run number to resume from where we left off

@@ -10,6 +10,4 @@ analysis = Analysis(path, sensor_id, sensor_type)
 # Get results
 result = analysis.save_data()
 
-# Print a sample result
-print(f"Mean Max kPa: {result['mean_max_kpa']}")
-print(f"COV Max kPa: {result['cov_max_kpa']}")
+print(result)

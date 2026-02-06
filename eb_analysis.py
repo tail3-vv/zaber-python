@@ -21,9 +21,10 @@ class Analysis():
         """
         # Store parameters
         self.sensor_id = sensor_id
-        self.path = path
+        self.path = Path(path) # this is because Path(path) is in fut folder
         self.sensor_type = sensor_type
-
+        print(self.path)
+        
         # Initialize channel order based on sensor type
         if sensor_type == 1:
             self.ch_order = np.arange(1, 9)
@@ -258,7 +259,7 @@ class Analysis():
                 plt.tight_layout()
 
                 # Save figure
-                filename = f'analysis/test/Raw Signal_Run #{i+1}_CH{j+1}.png'
+                filename = f'Raw Signal_Run #{i+1}_CH{j+1}.png'
                 plt.savefig(filename, dpi=300, bbox_inches='tight')
                 
                 # Close figure to free memory
