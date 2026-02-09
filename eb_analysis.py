@@ -21,7 +21,7 @@ class Analysis():
         """
         # Store parameters
         self.sensor_id = sensor_id
-        self.path = Path(path) # this is because Path(path) is in fut folder
+        self.path = Path(path).parent # this is because Path(path) is in fut folder
         self.sensor_type = sensor_type
         print(self.path)
         
@@ -34,12 +34,13 @@ class Analysis():
             raise ValueError(f"Invalid sensor_type: {sensor_type}")
 
         # Define paths and get file lists
-        self.cap_path = Path(path) / "CAP"
-        self.fut_path = Path(path) / "FUT"
+        self.cap_path = self.path / "CAP"
+        self.fut_path = self.path / "FUT"
 
         csv_files = sorted(self.cap_path.glob("*.csv"))
         xlsx_files = sorted(self.fut_path.glob("*.xlsx"))
         self.cap_size = len(csv_files)
+        print(self.cap_path)
 
         # Load data
         self.cap, self.fut = self._create_data(csv_files, xlsx_files)
@@ -259,7 +260,7 @@ class Analysis():
                 plt.tight_layout()
 
                 # Save figure
-                filename = f'Raw Signal_Run #{i+1}_CH{j+1}.png'
+                filename = self.path / f'Raw Signal_Run #{i+1}_CH{j+1}.png'
                 plt.savefig(filename, dpi=300, bbox_inches='tight')
                 
                 # Close figure to free memory
@@ -402,7 +403,7 @@ class Analysis():
             plt.tight_layout()
 
             # Save figure
-            filename = f'PS curve all CHs number #{i+1}.png'
+            filename = self.path / f'PS curve all CHs number #{i+1}.png'
             plt.savefig(filename, dpi=300, bbox_inches='tight')
             plt.close(fig)
 
@@ -440,7 +441,7 @@ class Analysis():
                 axes[i].legend(loc='lower right', fontsize=10)
 
         plt.tight_layout()
-        filename = 'PS curves all ch per run.png'
+        filename = self.path / 'PS curves all ch per run.png'
         plt.savefig(filename, dpi=300, bbox_inches='tight')
         plt.close(fig)
 
@@ -479,7 +480,7 @@ class Analysis():
 
         plt.tight_layout()
         # Save figure
-        filename = 'PS curves all run per CH.png'
+        filename = self.path / 'PS curves all run per CH.png'
         plt.savefig(filename, dpi=300, bbox_inches='tight')
         plt.close(fig)
 

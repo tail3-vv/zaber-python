@@ -140,8 +140,8 @@ class MainWindow(tk.Frame):
         self.testing_complete()
         self.is_test_started.set(0)
         self.current_run.set(1)
-        self.saved_path.set("")
-        self.sensor_id.set("")
+        #self.saved_path.set("")
+        #self.sensor_id.set("")
 
     """
     GUI Widgets that remain mostly the same during testing
