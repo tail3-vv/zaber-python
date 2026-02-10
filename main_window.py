@@ -8,12 +8,13 @@ import xlsxwriter
 from pathlib import Path
 from datetime import datetime
 # from zaber_cli import ZaberCLI
-# from futek_cli import FUTEKDeviceCLI
+from futek_cli import FUTEKDeviceCLI
 # from zaber_motion import Units
 from settings_window import SettingsWindow
 from shear_window import ShearWindow
 from analysis_window import AnalysisWindow
-from eb_analysis import Analysis
+from eb_analysis import EbAnalysis
+from shear_analysis import ShearAnalysis
 class MainWindow(tk.Frame):
     def __init__(self):
         self.root = Tk(screenName=None, baseName=None, className='Tk', useTk=1)
@@ -119,6 +120,7 @@ class MainWindow(tk.Frame):
         self.update_textbox(f"Beginning run {current_run}")
         state = self.test_funct(n_runs, current_run, self.saved_path.get(), 
                                 self.sensor_id.get(), self.zaber_comport.get())
+        # state = self.run_tests(n_runs, current_run, self.zaber_comport.get())
         
         # Check if run was paused or completed
         is_paused = current_run == state
@@ -318,7 +320,12 @@ class MainWindow(tk.Frame):
             complete.withdraw()
         def perform_analysis(*args):
             """Runs analysis in a separate script"""
-            analysis = Analysis(self.saved_path.get(), self.sensor_id.get(), sensor_type=3)
+            test_type = self.test_type.get()
+            if test_type == "EB":
+                analysis = EbAnalysis(self.saved_path.get(), self.sensor_id.get(), sensor_type=3)
+            elif test_type == "Shear":
+                analysis = ShearAnalysis(self.saved_path.get(), self.sensor_id.get())
+                analysis.run_full_analysis()
         # Create a new top-level window
         complete = tk.Toplevel(self.root)
         complete.title("Testing complete")

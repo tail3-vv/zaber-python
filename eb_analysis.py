@@ -9,10 +9,10 @@ from scipy.signal import find_peaks
 from scipy.ndimage import uniform_filter1d
 import pickle
 
-class Analysis():
+class EbAnalysis():
     def __init__(self, path, sensor_id, sensor_type):
         """
-        Initialize Analysis with parameters
+        Initialize EB Analysis with parameters
         
         Parameters:
             path: Path to data directory
@@ -52,7 +52,7 @@ class Analysis():
         self.ch = 8  # number of channels in sensor
         self.v = 5   # PCB Board Version: v2 = 2 | v3 = 5
 
-        self.SA = 325e-6  # Eco Blox surface area (325mm2)
+        self.SA = 325e-6  # Eco Blox surface area (325mm2) TODO: pass the SA variable from mainwindow
 
         # Correct channel order
         self.cap = self._correct_ch_order(self.cap)
@@ -582,3 +582,4 @@ class Analysis():
         return result
 
 
+ 

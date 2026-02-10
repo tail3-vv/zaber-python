@@ -12,7 +12,7 @@ from matplotlib.figure import Figure
 from matplotlib.animation import FuncAnimation
 import numpy as np
 from datetime import datetime
-# from futek_cli import FUTEKDeviceCLI
+from futek_cli import FUTEKDeviceCLI
 from pathlib import Path
 import xlsxwriter
 
