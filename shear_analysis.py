@@ -84,6 +84,10 @@ class ShearAnalysis():
                         .cumsum()
                         .values
                     )
+                
+                elif pd.api.types.is_numeric_dtype(time_col):
+                    # already elapsed time (float or int)
+                    elapsed = time_col.values
                 else:
                     elapsed = np.arange(len(fut_df))
             else:
