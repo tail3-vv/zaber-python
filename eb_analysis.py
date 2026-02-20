@@ -9,6 +9,7 @@ from scipy.signal import find_peaks
 from scipy.ndimage import uniform_filter1d
 import pickle
 
+from scipy.signal import savgol_filter
 class EbAnalysis():
     def __init__(self, path, sensor_id, sensor_type):
         """
@@ -184,11 +185,13 @@ class EbAnalysis():
 
             # identify channel with the highest change in capacitance - sync signals based on this channel
             max_per_channel = np.max(temp_run[i][0], axis=0)
-            chan = np.argmax(max_per_channel)  # Channel with highest max
+            global_max = np.max(max_per_channel)
+            chan_candidates = np.where(max_per_channel == global_max)[0]
+            chan = chan_candidates[0]  
 
             # Find location of maximum values
             loc_c = np.argmax(self.run[i][0], axis=0)  # Index of max for each channel
-            loc_f = np.argmax(self.run[i][1])  # Index of max for FUT
+            loc_f = np.nanargmax(self.run[i][1])  # Index of max for FUT (ignore NaN)
             M = self.run[i][1][loc_f]  # Max value of FUT
             
             # Calculate offset (number of data points to offset by)
@@ -221,13 +224,19 @@ class EbAnalysis():
                 futs = self.run[i][1][offset:]
                 test_fut = np.column_stack([timef[:loc_f], futs[:loc_f] / self.SA / 1000])   
 
+
             self.c[i,:] = np.max(caps, axis=0) # finding max CAP of all channels
 
             ### Remove end portion (500 data points) from test data to combat
             ### instances where the last data points include the drop off values
+            force = test_fut[:,1]
+            peak_idx = np.argmax(force)
+
+            test_cap = test_cap[:peak_idx, :]
+            test_fut = test_fut[:peak_idx, :]
             test_cap = test_cap[:-500, :]
             test_fut = test_fut[:-500, :]
-
+            
             # Store results
             self.test.append([test_cap, test_fut])
 
@@ -296,10 +305,13 @@ class EbAnalysis():
                 # Smooth data (using moving average with window=100)
                 st_pt = np.where(x-0 > 0)[0][0]
 
-                # Smooth x and y
-                x_smooth = uniform_filter1d(x[st_pt:], size=100, mode='nearest')
-                y_smooth = uniform_filter1d(y[st_pt:], size=100, mode='nearest')
-
+                # # Smooth x and y
+                # x_smooth = uniform_filter1d(x[st_pt:], size=100, mode='nearest')
+                # y_smooth = uniform_filter1d(y[st_pt:], size=100, mode='nearest')
+                # x_smooth = savgol_filter(x[st_pt:], 101, 2)
+                # y_smooth = savgol_filter(y[st_pt:], 101, 2)
+                x_smooth = pd.Series(x[st_pt:]).rolling(100, min_periods=1).mean().to_numpy()
+                y_smooth = pd.Series(y[st_pt:]).rolling(100, min_periods=1).mean().to_numpy()
                 # Store smoothed data (x is same for all channels)
                 if zaber_x_i is None:
                     zaber_x_i = x_smooth
@@ -313,18 +325,20 @@ class EbAnalysis():
 
                 # Find peaks in first derivative
                 peaks, properties = find_peaks(fir_dev_ij, 
-                                            prominence=0.08, 
+                                            prominence=0.08,
                                             width=300)
-                
+                # width=300
                 if len(peaks) > 1:
                     # Multiple peaks found - select the one with max prominence
                     peak_values = fir_dev_ij[peaks]
                     max_idx = np.argmax(peak_values)
                     locz_ij = peaks[max_idx]
                     valz_ij = peak_values[max_idx]
+                    print("multiple peaks found for Run {}, CH {}. Selected peak at index {} with value {:.3f}".format(i+1, j+1, locz_ij, valz_ij))
                 elif len(peaks) == 1:
                     locz_ij = peaks[0]
                     valz_ij = fir_dev_ij[locz_ij]
+                    #print("single peak found for Run {}, CH {} at index {} with value {:.3f}".format(i+1, j+1, locz_ij, valz_ij))
                 else:
                     locz_ij = None
                     valz_ij = None

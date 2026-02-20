@@ -8,13 +8,13 @@ import xlsxwriter
 from pathlib import Path
 from datetime import datetime
 # from zaber_cli import ZaberCLI
-from futek_cli import FUTEKDeviceCLI
+# from futek_cli import FUTEKDeviceCLI
 # from zaber_motion import Units
 from settings_window import SettingsWindow
 from shear_window import ShearWindow
-from analysis_window import AnalysisWindow
+# from analysis_window import AnalysisWindow
 from eb_analysis import EbAnalysis
-from shear_analysis import ShearAnalysis
+# from shear_analysis import ShearAnalysis
 class MainWindow(tk.Frame):
     def __init__(self):
         self.root = Tk(screenName=None, baseName=None, className='Tk', useTk=1)
@@ -28,6 +28,7 @@ class MainWindow(tk.Frame):
         # Initially these are empty strings
         self.saved_path = tk.StringVar()
         self.sensor_id = tk.StringVar()
+        self.sensor_type = tk.IntVar(value=3) # this is usually 1 or 3, 2 is archived
 
         # Initially these are set to 0 unless specified
         self.is_create_files = tk.BooleanVar(value=1) # this is boolean
@@ -200,6 +201,21 @@ class MainWindow(tk.Frame):
         # Add Widgets to list
         self.widgets.append(sensor_entry)
     
+    def select_sensor_type(self):
+        """ Prompt user for sensor type """
+        # Widget Labels
+        label = tk.Label(self.root, text="Sensor Type ")
+        sensor_entry = ttk.Combobox(self.root, textvariable=self.sensor_type, 
+                                   values=["1", "2", "3"], width=5)
+
+        # Widget positions
+        label.grid(sticky='w', row=4, column=0, padx=10,pady=10)
+        sensor_entry.grid(sticky='w', row=4, column=1, pady=10)
+
+        # Add Widgets to list
+        self.widgets.append(sensor_entry)
+    
+    
     def add_separator(self, y_value, window):
         """Adds seperator line to window"""
         separator = ttk.Separator(window)
@@ -210,14 +226,14 @@ class MainWindow(tk.Frame):
         """ Checkbox to create folders if the do not exist on user's filepath """
         checkbox = tk.Checkbutton(self.root, text="Create folders if they do not exist",
                                   variable=self.is_create_files, command=self.is_create_files.get())
-        checkbox.grid(sticky="w", row=4, column=1, pady=40)
+        checkbox.grid(sticky="w", row=5, column=1, pady=20)
         # Add Widgets to list
         self.widgets.append(checkbox)
 
     def begin_test_btn(self):
         """ Opens dialog to verify settings before actually beginning tests """
         btn = tk.Button(self.root, text="Begin Test", command=self.open_settings)
-        btn.grid(sticky="w", row=6, column=3)
+        btn.grid(sticky="w", row=7, column=3)
 
 
         # Add Widgets to list
@@ -232,7 +248,7 @@ class MainWindow(tk.Frame):
         self.pause_btn = tk.Button(self.root, text="Pause Run", 
                                    command=self._helper_pause,
                                    state=tk.DISABLED)
-        self.pause_btn.grid(sticky="w", row=6, column=2)
+        self.pause_btn.grid(sticky="w", row=7, column=2)
 
     def _helper_pause(self, *args):
         if self.toggle_pause.get() == 0:
@@ -321,8 +337,9 @@ class MainWindow(tk.Frame):
         def perform_analysis(*args):
             """Runs analysis in a separate script"""
             test_type = self.test_type.get()
+            sensor_type = int(self.sensor_type.get())
             if test_type == "EB":
-                analysis = EbAnalysis(self.saved_path.get(), self.sensor_id.get(), sensor_type=3)
+                analysis = EbAnalysis(self.saved_path.get(), self.sensor_id.get(), sensor_type=sensor_type)
             elif test_type == "Shear":
                 analysis = ShearAnalysis(self.saved_path.get(), self.sensor_id.get())
                 analysis.run_full_analysis()
@@ -553,6 +570,7 @@ class MainWindow(tk.Frame):
         self.display_updates()
         self.select_folder()
         self.enter_sensor_id()
+        self.select_sensor_type()
         self.add_separator(y_value=310, window=self.root) # about every 50 px is a row
         self.create_files_checkbox()
         self.begin_test_btn()

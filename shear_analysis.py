@@ -3,6 +3,7 @@ import numpy as np
 import pandas as pd
 from scipy import interpolate
 import matplotlib.pyplot as plt
+import matplotlib.ticker as ticker
 from datetime import datetime
 import pickle
 
@@ -43,7 +44,8 @@ class ShearAnalysis():
 
         for csv_file in self.csv_files:
             df = pd.read_csv(csv_file)
-            self.cap_data.append(df)
+            cap_df = pd.read_csv(csv_file, skiprows=1)
+            self.cap_data.append(cap_df)
         
 
         for xlsx_file in self.xlsx_files:
@@ -54,23 +56,55 @@ class ShearAnalysis():
     def plot_cap_and_force(self):
         """
         Plot raw sensor capacitance and futek load cell data for visual inspection.
-        Identifies instances where capacitance signal goes negative and/or 
-        delta capacitance signal exceeds 10 pF.
         """
-        # Create full-screen figure
-        fig = plt.figure(figsize=(19.2, 10.8))  # Full HD resolution
+        # Create full-screen figure ONCE
+        fig = plt.figure(figsize=(19.2, 10.8))
         fig.canvas.manager.set_window_title('Shear Analysis')
         
-        # Store axes for linking
+        # Create all subplots ONCE (before file loop)
         axes = []
+        for ch_idx in range(self.ch):
+            ax = plt.subplot(9, 1, ch_idx + 1, sharex=axes[0] if axes else None)
+            axes.append(ax)
+            
+            # Set labels and title once
+            ax.set_ylabel('CAP (pF)', color='tab:blue')
+            ax.tick_params(axis='y', labelcolor='tab:blue')
+            ax.set_title(f'CH {ch_idx + 1}')
+            ax.grid(True, alpha=0.3)
+            
+            # Important: Set zorder so grid shows behind both plots
+            # ax.set_axisbelow(True)
+            
+            if ch_idx < self.ch - 1:
+                ax.tick_params(labelbottom=False)
         
-        # Iterate through each file
-        # Iterate through each file
+        # Add force subplot
+        ax_force = plt.subplot(9, 1, 9, sharex=axes[0])
+        axes.append(ax_force)
+        ax_force.set_ylabel('Force (N)')
+        ax_force.set_xlabel('Time (s)')
+        ax_force.grid(True, alpha=0.3)
+        # Show major ticks on the x-axis every 50 seconds
+        ax_force.xaxis.set_major_locator(ticker.MultipleLocator(50))
+        
+        # Create twin axes once for each channel
+        twin_axes = []
+        for ch_idx in range(self.ch):
+            ax_r = axes[ch_idx].twinx()
+            ax_r.set_ylabel('ΔCAP (pF)', color='tab:orange')
+            ax_r.tick_params(axis='y', labelcolor='tab:orange')
+            # Make the twin axis background transparent so the left axis lines remain visible
+            ax_r.patch.set_visible(False)
+            # Ensure main axis is below the twin axis so grid stays behind both
+            axes[ch_idx].set_zorder(0)
+            ax_r.set_zorder(1)
+            twin_axes.append(ax_r)
+        
+        # NOW iterate through files and ADD lines to existing plots
         for file_idx in range(len(self.cap_data)):
             cap_df = self.cap_data[file_idx]
             fut_df = self.fut_data[file_idx]
-
-            axes = []
 
             # ---- FUT time base ----
             if len(fut_df.columns) >= 4:
@@ -84,9 +118,7 @@ class ShearAnalysis():
                         .cumsum()
                         .values
                     )
-                
                 elif pd.api.types.is_numeric_dtype(time_col):
-                    # already elapsed time (float or int)
                     elapsed = time_col.values
                 else:
                     elapsed = np.arange(len(fut_df))
@@ -96,48 +128,34 @@ class ShearAnalysis():
             # ---- CAP time ----
             cap_time = cap_df.iloc[:, 0].values
 
-            # ---- CAP channels (1–8) ----
+            # ---- Plot on existing CAP channel axes ----
             for ch_idx in range(self.ch):
-                ax = plt.subplot(
-                    9, 1, ch_idx + 1,
-                    sharex=axes[0] if axes else None
-                )
-                axes.append(ax)
-
                 cap_values = cap_df.iloc[:, ch_idx + self.v].values
-                initial_cap = cap_values[0]
+                initial_cap = cap_values[2]
                 delta_cap = cap_values - initial_cap
+                # Plot on left axis (raw CAP)
+                axes[ch_idx].plot(cap_time, cap_values, color='tab:blue', alpha=0.7)
 
-                # Left axis: raw CAP
-                ax.plot(cap_time, cap_values, color='tab:blue')
-                ax.set_ylabel('CAP (pF)', color='tab:blue')
-                ax.tick_params(axis='y', labelcolor='tab:blue')
-                ax.set_title(f'CH {ch_idx + 1}')
-                ax.grid(True, alpha=0.3)
+                # Plot on right axis (delta CAP)
+                twin_axes[ch_idx].plot(cap_time, delta_cap, color='tab:orange', alpha=0.7)
+                # Expand the right axis limits to include the new delta data with a small margin
+                y_min = np.min(delta_cap)
+                y_max = np.max(delta_cap)
+                span = y_max - y_min
+                if span == 0:
+                    span = 1.0
+                margin = span * 0.2
+                cur_ylim = twin_axes[ch_idx].get_ylim()
+                new_min = min(cur_ylim[0], y_min - margin)
+                new_max = max(cur_ylim[1], y_max + margin)
+                twin_axes[ch_idx].set_ylim(new_min, new_max)
 
-                # Right axis: delta CAP
-                ax_r = ax.twinx()
-                ax_r.plot(cap_time, delta_cap, color='tab:orange')
-                ax_r.set_ylabel('ΔCAP (pF)', color='tab:orange')
-                ax_r.tick_params(axis='y', labelcolor='tab:orange')
-
-                if ch_idx < self.ch - 1:
-                    ax.tick_params(labelbottom=False)
-
-            # ---- FORCE (9th subplot) ----
-            ax_force = plt.subplot(9, 1, 9, sharex=axes[0])
-            axes.append(ax_force)
-
+            # ---- Plot force ----
             if len(fut_df.columns) >= 2:
                 force_values = fut_df.iloc[:, 1].values
                 n = min(len(elapsed), len(force_values))
-                ax_force.plot(elapsed[:n], force_values[:n], 'g-', linewidth=1.5)
+                ax_force.plot(elapsed[:n], force_values[:n], 'g-', linewidth=1.5, alpha=0.7)
 
-            ax_force.set_ylabel('Force (N)')
-            ax_force.set_xlabel('Time (s)')
-            ax_force.grid(True, alpha=0.3)
-
-        
         plt.tight_layout()
         
         # Save figure
