@@ -15,7 +15,7 @@ from shear_window import ShearWindow
 # from analysis_window import AnalysisWindow
 from eb_analysis import EbAnalysis
 # from shear_analysis import ShearAnalysis
-class MainWindow(tk.Frame):
+class MainWindow:
     def __init__(self):
         self.root = Tk(screenName=None, baseName=None, className='Tk', useTk=1)
         self.root.title("Zaber Control Stage")
@@ -58,6 +58,9 @@ class MainWindow(tk.Frame):
         self.widgets = [] # when testing starts, these widgets will all get disabled
 
         self._create_widgets()
+
+        # On close of window behavior
+        self.root.protocol("WM_DELETE_WINDOW", self.on_close)
 
 
     def display_updates(self):
@@ -250,6 +253,28 @@ class MainWindow(tk.Frame):
                                    state=tk.DISABLED)
         self.pause_btn.grid(sticky="w", row=7, column=2)
 
+    def create_analysis_btn(self):
+        """
+        Runs analysis script on current selected FUT folder
+        """
+        analysis_btn = tk.Button(self.root, text="Perform Analysis", 
+                                   command=self.analysis_warning,
+                                   state=tk.NORMAL)
+        analysis_btn.grid(sticky="w", row=7, column=1)
+    
+    def analysis_warning(self):
+        """ Sends a warning to user that they should select a folder with FUT data before performing analysis 
+            Aswell as make sure they have performed a test so there is data to analyze """
+        self.warning("Please select a folder with FUT data and perform a test before running analysis.")
+        # wait for wanring to be closed before allowing user to continue
+        if self.is_warning_cancel.get() == 0:
+            self.update_textbox(f"Performing analysis on sensor {self.sensor_id.get()} with sensor type {self.sensor_type.get()}...")
+            self.perform_analysis()
+            self.update_textbox(f"Analysis complete for sensor {self.sensor_id.get()}.")
+        else:
+            self.update_textbox(f"Analysis cancelled.")
+        self.is_warning_cancel.set(0) # reset warning cancel variable for future use
+
     def _helper_pause(self, *args):
         if self.toggle_pause.get() == 0:
             self.toggle_pause.set(1)
@@ -329,20 +354,21 @@ class MainWindow(tk.Frame):
         # Pause main thread until action is done 
         self.root.wait_window(warn) 
     
+    def perform_analysis(self,*args):
+        """Runs analysis in a separate script"""
+        test_type = self.test_type.get()
+        sensor_type = int(self.sensor_type.get())
+        if test_type == "EB":
+            analysis = EbAnalysis(self.saved_path.get(), self.sensor_id.get(), sensor_type=sensor_type)
+        elif test_type == "Shear":
+            analysis = ShearAnalysis(self.saved_path.get(), self.sensor_id.get())
+            analysis.run_full_analysis()
+
     def testing_complete(self):
         def new_test(*args):
             """Helper function to go back to testing window"""
             complete.grab_release()
             complete.withdraw()
-        def perform_analysis(*args):
-            """Runs analysis in a separate script"""
-            test_type = self.test_type.get()
-            sensor_type = int(self.sensor_type.get())
-            if test_type == "EB":
-                analysis = EbAnalysis(self.saved_path.get(), self.sensor_id.get(), sensor_type=sensor_type)
-            elif test_type == "Shear":
-                analysis = ShearAnalysis(self.saved_path.get(), self.sensor_id.get())
-                analysis.run_full_analysis()
         # Create a new top-level window
         complete = tk.Toplevel(self.root)
         complete.title("Testing complete")
@@ -367,7 +393,7 @@ class MainWindow(tk.Frame):
                              command=new_test, 
                              width=10, height=1)
         analysis_btn = tk.Button(complete, text="Perform Analysis", 
-                             command=perform_analysis, 
+                             command=self.perform_analysis, 
                              width=18, height=1)
         # Button arrangment
         exit_btn.grid(sticky='w', row=2, column=1, padx=5, pady=30)
@@ -575,10 +601,14 @@ class MainWindow(tk.Frame):
         self.create_files_checkbox()
         self.begin_test_btn()
         self.create_pause_btn()
+        self.create_analysis_btn()
         # self.navbar()
 
         self.is_test_started.trace('w', self.trace_test)
         self.toggle_pause.trace('w', self.trace_pause)
+
+    def on_close(self):
+        self.root.destroy()
 
 main = MainWindow()
 main.root.mainloop()
