@@ -8,7 +8,6 @@ import matplotlib.pyplot as plt
 from scipy.signal import find_peaks
 from scipy.ndimage import uniform_filter1d
 import pickle
-
 from scipy.signal import savgol_filter
 class EbAnalysis():
     def __init__(self, path, sensor_id, sensor_type):
@@ -592,6 +591,44 @@ class EbAnalysis():
         # zaber_x and zaber_y data
         result['zaber_x'] = self.zaber_x
         result['zaber_y'] = self.zaber_y
+        
+        # save pickle
+        with open(self.path / 'eb_analysis_results.pkl', 'wb') as f:
+            pickle.dump(result, f)
+
+        # helper to convert pickle -> xlsx (simpler version)
+        def pickle_to_excel(pkl_path, xlsx_path):
+            with open(pkl_path, 'rb') as f:
+                data = pickle.load(f)
+
+            with pd.ExcelWriter(xlsx_path) as writer:
+                for key, val in data.items():
+                    sheet_base = str(key)[:31]
+                    try:
+                        if isinstance(val, np.ndarray):
+                            pd.DataFrame(val).to_excel(writer, sheet_name=sheet_base, index=False)
+
+                        elif isinstance(val, list):
+                            # try to write list as a table; if that fails, write each element to its own sheet
+                            try:
+                                pd.DataFrame(val).to_excel(writer, sheet_name=sheet_base, index=False)
+                            except Exception:
+                                for i, elem in enumerate(val):
+                                    sheet = f"{sheet_base}_run{i+1}"[:31]
+                                    try:
+                                        pd.DataFrame(elem).to_excel(writer, sheet_name=sheet, index=False)
+                                    except Exception:
+                                        pd.DataFrame([repr(elem)]).to_excel(writer, sheet_name=sheet, index=False)
+
+                        else:
+                            pd.DataFrame([repr(val)]).to_excel(writer, sheet_name=sheet_base, index=False)
+
+                    except Exception:
+                        # last-resort: write representation
+                        pd.DataFrame([repr(val)]).to_excel(writer, sheet_name=sheet_base, index=False)
+
+        # use it
+        pickle_to_excel(self.path / 'eb_analysis_results.pkl', self.path / 'EB_Analysis_Results.xlsx')
 
         return result
 

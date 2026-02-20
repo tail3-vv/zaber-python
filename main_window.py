@@ -204,7 +204,7 @@ class MainWindow(tk.Frame):
     def select_sensor_type(self):
         """ Prompt user for sensor type """
         # Widget Labels
-        label = tk.Label(self.root, text="Sensor Type ")
+        label = tk.Label(self.root, text="Sensor Type: ")
         sensor_entry = ttk.Combobox(self.root, textvariable=self.sensor_type, 
                                    values=["1", "2", "3"], width=5)
 
