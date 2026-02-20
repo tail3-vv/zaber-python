@@ -2,6 +2,7 @@ import tkinter as tk
 from tkinter import Tk
 from tkinter import ttk
 from tkinter import filedialog as fd
+from tkinter import scrolledtext
 import numpy as np
 import time
 import xlsxwriter
@@ -65,7 +66,7 @@ class MainWindow:
 
     def display_updates(self):
         """ Display updates about current run progress """
-        textbox = tk.Text(self.root, 
+        textbox = scrolledtext.ScrolledText(self.root, 
                           width=61,
                           height=5,
                           borderwidth=5,
