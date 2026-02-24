@@ -5,6 +5,9 @@ clr.AddReference("FUTEK.Devices")
 import FUTEK.Devices
 from FUTEK.Devices import DeviceRepository
 
+"""
+Debugger class that, once ran, will display the output datastream of the loadcell.
+"""
 def main():
     repo = DeviceRepository()
 

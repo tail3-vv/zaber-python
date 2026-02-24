@@ -4,6 +4,11 @@ clr.AddReference("FUTEK.Devices")
 import FUTEK.Devices
 from FUTEK.Devices import DeviceRepository
 
+"""
+Controls Futek Loadcell
+Connects/Disconnects loadcell
+Displays loadcell information
+"""
 class FUTEKDeviceCLI:
     def __init__(self):
         self.oFUTEKDeviceRepoDLL = self.connect()

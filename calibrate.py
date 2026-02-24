@@ -3,8 +3,11 @@ from zaber_motion.ascii import Connection
 from zaber_motion.exceptions import MovementFailedExceptionData
 from zaber_cli import ZaberCLI
 
-# TODO: possibly turn this script into a function
 """
+Currently, this file is not being used anywhere in the GUI.
+But will keep this file since it is helpful for debugging the zaber setup
+when needed
+
 USB connection name (ie COM3, COM4, COM5) is varies by laptop
 Check device manager -> Ports (COM & LPT) to see which connection works
 """

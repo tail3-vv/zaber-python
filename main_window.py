@@ -13,15 +13,26 @@ from datetime import datetime
 # from zaber_motion import Units
 from settings_window import SettingsWindow
 from shear_window import ShearWindow
-# from analysis_window import AnalysisWindow
-from eb_analysis import EbAnalysis
+from control_window import ControlWindow
+from em_analysis import EMAnalysis
 # from shear_analysis import ShearAnalysis
+
+"""
+File where mainloop is executed.
+Holds infrastructure to execute all tests
+Implementation for EM testing is here, shear testing implementation is in shear_window
+EM testing requires too many dependent variables to be kept in a separate file
+"""
 class MainWindow:
     def __init__(self):
         self.root = Tk(screenName=None, baseName=None, className='Tk', useTk=1)
         self.root.title("Zaber Control Stage")
-        self.root.geometry("625x375")
+        self.root.geometry("650x425")
         self.root.resizable(False, False)
+
+        # Configure grid weights so widgets expand with window
+        for i in range(8):
+            self.root.grid_columnconfigure(i, weight=1)
 
         """
         These are the initial test settings
@@ -43,8 +54,8 @@ class MainWindow:
         # Comports have default values
         self.zaber_comport = tk.StringVar(value="COM3")
 
-        # EB, Shear etc.
-        self.test_type = tk.StringVar(value="EB")
+        # EM, Shear etc.
+        self.test_type = tk.StringVar(value="EM")
 
         # surface area of eco block ie 325mm2, 50.27, etc.
         self.surface_area = tk.StringVar(value="325mm2")
@@ -55,7 +66,7 @@ class MainWindow:
         self.textbox = None
         self.pause_btn = None
         self.toggle_pause = tk.BooleanVar(value=0) # this is boolean, paused=1, not paused=0
-        self.is_warning_cancel = tk.BooleanVar(value=0) # this is for pause warning currently during EB test
+        self.is_warning_cancel = tk.BooleanVar(value=0) # this is for pause warning currently during EM test
         self.widgets = [] # when testing starts, these widgets will all get disabled
 
         self._create_widgets()
@@ -94,9 +105,9 @@ class MainWindow:
             for w in self.widgets:
                     w.config(state=tk.DISABLED)
 
-            if test_type == "EB":
+            if test_type == "EM":
                 self.pause_btn.config(state=tk.NORMAL)
-                self._eb_test()
+                self._EM_test()
             elif  test_type == "Shear":
                 self.pause_btn.config(state=tk.DISABLED)
                 self._shear_test()
@@ -113,7 +124,7 @@ class MainWindow:
         """"""
         shear_window = ShearWindow(self.root, self)
 
-    def _eb_test(self):
+    def _EM_test(self):
         """ Helper function to continue test if conditions are met """
         if not (self.is_test_started.get() and self.toggle_pause.get() == 0):
             return
@@ -154,18 +165,21 @@ class MainWindow:
     GUI Widgets that remain mostly the same during testing
     """
     def navbar(self):
-        def open_analysis():
-            analysis = AnalysisWindow(self.root, self)
-        frame = tk.Frame(self.root, bg="lightblue", width=625, height=100, bd=3, relief=tk.RIDGE)
-        frame.grid(sticky='ew', row=0, column=0, columnspan=4, rowspan=1)
-        self.root.grid_rowconfigure(0, weight=1)
-
+        def open_control():
+            control = ControlWindow(self.root, self)
+        navbar = tk.Frame(self.root, bg="lightblue", width=700, height=32, bd=3, relief=tk.RIDGE)
+        navbar.grid(sticky='ew', row=0, column=0, columnspan=8, rowspan=1)
+        #self.root.grid_rowconfigure(0, weight=1)
+        for i in range(50):
+            navbar.columnconfigure(i, weight=1)
         # Navigation buttons
-        main_btn = tk.Button(self.root, text='Analysis', command=open_analysis)
+        main_btn = tk.Button(navbar, text='Main Stage', width=10, state=tk.DISABLED)
+        control_btn = tk.Button(navbar, text='Control Panel', command=open_control, width=10)
 
         # Layout
-        main_btn.grid(sticky='w', row=0, column=0)
-        
+        main_btn.grid(sticky='w', row=0, column=0, padx=10)
+        control_btn.grid(sticky='w', row=0, column=1)
+
     def select_folder(self):
         """ Prompt user for save folder """
         def open_folder():
@@ -230,7 +244,7 @@ class MainWindow:
         """ Checkbox to create folders if the do not exist on user's filepath """
         checkbox = tk.Checkbutton(self.root, text="Create folders if they do not exist",
                                   variable=self.is_create_files, command=self.is_create_files.get())
-        checkbox.grid(sticky="w", row=5, column=1, pady=20)
+        checkbox.grid(sticky="w", row=5, column=1, pady=30)
         # Add Widgets to list
         self.widgets.append(checkbox)
 
@@ -261,7 +275,7 @@ class MainWindow:
         analysis_btn = tk.Button(self.root, text="Perform Analysis", 
                                    command=self.analysis_warning,
                                    state=tk.NORMAL)
-        analysis_btn.grid(sticky="w", row=7, column=1)
+        analysis_btn.grid(sticky="w", row=7, column=0, padx=10)
     
     def analysis_warning(self):
         """ Sends a warning to user that they should select a folder with FUT data before performing analysis 
@@ -281,7 +295,7 @@ class MainWindow:
             self.toggle_pause.set(1)
         elif self.toggle_pause.get() == 1: # if test is Paused then unpause
             self.toggle_pause.set(0)
-            self._eb_test()
+            self._EM_test()
 
     def update_pause_btn(self, *args):
         """ Updates pause text to be correct """
@@ -359,8 +373,8 @@ class MainWindow:
         """Runs analysis in a separate script"""
         test_type = self.test_type.get()
         sensor_type = int(self.sensor_type.get())
-        if test_type == "EB":
-            analysis = EbAnalysis(self.saved_path.get(), self.sensor_id.get(), sensor_type=sensor_type)
+        if test_type == "EM":
+            analysis = EMAnalysis(self.saved_path.get(), self.sensor_id.get(), sensor_type=sensor_type)
         elif test_type == "Shear":
             analysis = ShearAnalysis(self.saved_path.get(), self.sensor_id.get())
             analysis.run_full_analysis()
@@ -603,7 +617,7 @@ class MainWindow:
         self.begin_test_btn()
         self.create_pause_btn()
         self.create_analysis_btn()
-        # self.navbar()
+        self.navbar()
 
         self.is_test_started.trace('w', self.trace_test)
         self.toggle_pause.trace('w', self.trace_pause)

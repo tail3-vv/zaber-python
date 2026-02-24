@@ -40,7 +40,7 @@ class SettingsWindow(tk.Toplevel):
         heading.pack(padx=10, pady=20)
     
     def _create_test_selection(self):
-        """Selection box for different available tests (EB, Shear)"""
+        """Selection box for different available tests (EM, Shear)"""
         def on_test_select(event):
             selected_item = test_combobox.get()
             test_combobox.set(selected_item)
@@ -58,9 +58,9 @@ class SettingsWindow(tk.Toplevel):
                     w.config(state=tk.NORMAL)
         
         test_label = tk.Label(self, text="Test Type:")
-        test_combobox = ttk.Combobox(self, values=['EB', 'Shear'],
+        test_combobox = ttk.Combobox(self, values=['EM', 'Shear'],
                                       state='readonly', textvariable=self.main_window.test_type)
-        test_combobox.set('EB')
+        test_combobox.set('EM')
         test_combobox.bind("<<ComboboxSelected>>", on_test_select)
         test_label.grid(sticky='w', row=2, column=0, padx=10, pady=10)
         test_combobox.grid(sticky='w', row=2, column=0, padx=125, pady=10)

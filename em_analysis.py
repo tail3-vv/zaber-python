@@ -2,6 +2,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 from scipy import interpolate
+from scipy.interpolate import PchipInterpolator
 import copy
 import matplotlib.pyplot as plt
 
@@ -9,7 +10,7 @@ from scipy.signal import find_peaks
 from scipy.ndimage import uniform_filter1d
 import pickle
 from scipy.signal import savgol_filter
-class EbAnalysis():
+class EMAnalysis():
     def __init__(self, path, sensor_id, sensor_type):
         """
         Initialize EB Analysis with parameters
@@ -166,7 +167,8 @@ class EbAnalysis():
             
             # Interpolate FUT
             fut_interp = np.interp(t_f_i, elapsed, self.fut[i].iloc[:, 1])
-            
+            print(elapsed[:5])
+            print(cap_time_clean[:5])
             # Store results
             self.run.append([cap_interp, fut_interp])
 
@@ -252,13 +254,13 @@ class EbAnalysis():
 
                 # Subplot 2: Force vs Time
                 ax2.plot(self.test[i][1][:, 0], self.test[i][1][:, 1])
-                ax2.set_ylabel('Force (kPa)', fontsize=12)
+                ax2.set_ylabel('Pressure (kPa)', fontsize=12)
                 ax2.set_xlabel('Time (s)', fontsize=12)
                 ax2.grid(True, alpha=0.3)
 
                 # Subplot 3: CAP vs Force (Hysteresis)
                 ax3.plot(self.test[i][1][:, 1], self.test[i][0][:, j+1])
-                ax3.set_xlabel('Force (kPa)', fontsize=12)
+                ax3.set_xlabel('Pressure (kPa)', fontsize=12)
                 ax3.set_ylabel('Change in CAP (pF)', fontsize=12)
                 ax3.grid(True, alpha=0.3)
 
@@ -309,8 +311,8 @@ class EbAnalysis():
                 # y_smooth = uniform_filter1d(y[st_pt:], size=100, mode='nearest')
                 # x_smooth = savgol_filter(x[st_pt:], 101, 2)
                 # y_smooth = savgol_filter(y[st_pt:], 101, 2)
-                x_smooth = pd.Series(x[st_pt:]).rolling(100, min_periods=1).mean().to_numpy()
-                y_smooth = pd.Series(y[st_pt:]).rolling(100, min_periods=1).mean().to_numpy()
+                x_smooth = pd.Series(x[st_pt:]).rolling(125, min_periods=1).mean().to_numpy()
+                y_smooth = pd.Series(y[st_pt:]).rolling(125, min_periods=1).mean().to_numpy()
                 # Store smoothed data (x is same for all channels)
                 if zaber_x_i is None:
                     zaber_x_i = x_smooth
@@ -386,7 +388,7 @@ class EbAnalysis():
                 if locz_ij is not None:
                     ax.plot(x_smooth[locz_ij], y_smooth[locz_ij], 'or', 
                         markersize=10, linewidth=2, label='Inflection Point')
-                ax.set_xlabel('Force (kPa)', fontsize=10)
+                ax.set_xlabel('Pressure (kPa)', fontsize=10)
                 ax.set_ylabel('Change in CAP (pF)', fontsize=10, color='tab:blue')
                 ax.tick_params(axis='y', labelcolor='tab:blue')
 
@@ -397,11 +399,13 @@ class EbAnalysis():
                 if locz_ij is not None:
                     ax2.plot(x_smooth[locz_ij], fir_dev_ij[locz_ij], 'ok', 
                             markersize=8, linewidth=2, label='Max Slope')
+                print(x_smooth[locz_ij],', ',fir_dev_ij[locz_ij])
+            
                 ax2.set_ylabel('1st Derivative (pF/kPa)', fontsize=10, color='tab:orange')
                 ax2.tick_params(axis='y', labelcolor='tab:orange')
                 
                 ax.grid(True, alpha=0.3)
-
+            print('---')
             # Store data for this run
             self.zaber_x.append(zaber_x_i)
             self.zaber_y.append(zaber_y_i)
@@ -448,7 +452,7 @@ class EbAnalysis():
                 # Plot P.S curve
                 axes[i].plot(x_smooth, y_smooth, '-', linewidth=2, label=f'Ch. #: {j+1}')
                 axes[i].set_title(f'Run {i+1}', fontsize=14, fontweight='bold')
-                axes[i].set_xlabel('Force (kPa)', fontsize=12)
+                axes[i].set_xlabel('Pressure (kPa)', fontsize=12)
                 axes[i].set_ylabel('Change in CAP (pF)', fontsize=12)
                 axes[i].grid(True, alpha=0.3)
                 axes[i].legend(loc='lower right', fontsize=10)
@@ -479,7 +483,7 @@ class EbAnalysis():
                             alpha=0.8)
                 
                 axes[j].set_title(f'CH {j+1}', fontsize=14, fontweight='bold')
-                axes[j].set_xlabel('Force (kPa)', fontsize=11)
+                axes[j].set_xlabel('Pressure (kPa)', fontsize=11)
                 axes[j].set_ylabel('Change in CAP (pF)', fontsize=11)
                 axes[j].grid(True, alpha=0.3)
 

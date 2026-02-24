@@ -1,7 +1,11 @@
 import tkinter as tk
 from tkinter import ttk
 from main_window import MainWindow
-from analysis_window import AnalysisWindow
+from control_window import AnalysisWindow
+"""
+An Attempt at a framework to have a navbar that controls windows
+Currently not being used due to large overhead with refactoring code.
+"""
 
 class App(tk.Tk):
     """Main application controller that manages view switching"""

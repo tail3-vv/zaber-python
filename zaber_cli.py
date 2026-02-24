@@ -1,6 +1,9 @@
 from zaber_motion.ascii import Connection
 from zaber_motion import exceptions
-
+"""
+Controls Zaber stage
+Currently just used to connect/disconnect the stage
+"""
 class ZaberCLI():
     def __init__(self):
         # TODO: we probably need to put self.connection instantiation

@@ -12,6 +12,7 @@ from datetime import datetime
 # from futek_cli import FUTEKDeviceCLI
 from pathlib import Path
 import xlsxwriter
+from time import sleep
 """
 Window for Shear testing live graph
 TODO: Add option to stop and save the graph
@@ -27,7 +28,7 @@ class ShearWindow(tk.Toplevel):
         # Initial vars for plotting load cell data
         self.fig = Figure(figsize=(5, 4), dpi=100)
         self.ax = self.fig.add_subplot(111)
-        self.line, = self.ax.plot([], [], 'r-', lw=2)
+        self.line, = self.ax.plot([], [], 'r-', lw=2, marker=None)
         self.ax.set_xlim(left=0, right=10)  # Set initial right limit, will autoscale
         self.curr_xlim = 10
         self.curr_ylim = 10
@@ -36,6 +37,14 @@ class ShearWindow(tk.Toplevel):
         self.ax.set_xlabel("Time Elapsed (seconds)")
         self.ax.set_ylabel("Force (N)")
         
+        # Text for displaying live sample rate
+        self.sample_rate_text = self.ax.text(
+            0.02, 0.95,
+            "",
+            transform=self.ax.transAxes,
+            verticalalignment='top'
+        )
+
         # Format x-axis to show MM:SS format
         def format_time(x, pos):
             minutes = int(x // 60)
@@ -68,7 +77,16 @@ class ShearWindow(tk.Toplevel):
         self.cumulative_btn = tk.Checkbutton(self.seconds_frame, text="Cumulative Time",
                                       variable=self.is_checked,
                                         width=15, height=1)
-        
+        # Checkbox to toggle markers on the plotted line
+        self.show_markers = tk.BooleanVar(value=False)
+        self.markers_btn = tk.Checkbutton(
+            self.seconds_frame,
+            text="Show Markers",
+            variable=self.show_markers,
+            command=self.toggle_markers,
+            width=12,
+            height=1
+        )
         # Entry to choose how large the axis is scaled
         self.yaxis_entry_label = tk.Label(self.seconds_frame, text="Y-Axis Limit:")
         self.yaxis_max_entry = tk.Entry(self.seconds_frame, width=10)
@@ -81,6 +99,7 @@ class ShearWindow(tk.Toplevel):
         # Pack all widgets
         self.exit_btn.pack(side=tk.BOTTOM, pady=10, padx=10)
         self.cumulative_btn.pack(side=tk.RIGHT, padx=10)
+        self.markers_btn.pack(side=tk.RIGHT, padx=5)
         self.seconds_frame.pack(side=tk.BOTTOM, pady=5, padx=5)
         self.seconds_label.pack(side=tk.LEFT, padx=(0, 5))
         self.seconds_entry.pack(side=tk.LEFT)
@@ -110,6 +129,19 @@ class ShearWindow(tk.Toplevel):
         
         # On close of window behavior
         self.protocol("WM_DELETE_WINDOW", self.on_close)
+    
+    def toggle_markers(self):
+        """
+        callback function to display sample markers during the live graph
+        """
+        if self.show_markers.get():
+            self.line.set_marker('o')
+            self.line.set_markersize(4)
+        else:
+            self.line.set_marker('')
+
+        self.line.stale = True
+        self.canvas.draw_idle()
 
     def update_plot(self, frame):
         """ 
@@ -134,7 +166,7 @@ class ShearWindow(tk.Toplevel):
 
         # Update line data
         self.line.set_data(self.time_readings, self.force_readings)
-        
+            
         # Update Y-axis limit if changed
         try:
             new_ylim = float(self.yaxis_max_entry.get())
@@ -162,6 +194,13 @@ class ShearWindow(tk.Toplevel):
                 self.ax.set_xlim(elapsed_time - sec, elapsed_time)
             else:
                 self.ax.set_xlim(0, sec)
+        
+        # For displaying live sample rate
+        if len(self.time_readings) > 100:
+            time_span = self.time_readings[-1] - self.time_readings[-100]
+            if time_span > 0:
+                sample_rate = 100 / time_span
+                self.sample_rate_text.set_text(f"Sample Rate: {sample_rate:.1f} Hz")
 
         return self.line,
 
