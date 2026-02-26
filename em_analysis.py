@@ -309,10 +309,10 @@ class EMAnalysis():
                 # # Smooth x and y
                 # x_smooth = uniform_filter1d(x[st_pt:], size=100, mode='nearest')
                 # y_smooth = uniform_filter1d(y[st_pt:], size=100, mode='nearest')
-                # x_smooth = savgol_filter(x[st_pt:], 101, 2)
-                # y_smooth = savgol_filter(y[st_pt:], 101, 2)
-                x_smooth = pd.Series(x[st_pt:]).rolling(125, min_periods=1).mean().to_numpy()
-                y_smooth = pd.Series(y[st_pt:]).rolling(125, min_periods=1).mean().to_numpy()
+                # x_smooth = savgol_filter(x[st_pt:], 75, 2)
+                # y_smooth = savgol_filter(y[st_pt:], 75, 2)
+                x_smooth = pd.Series(x[st_pt:]).rolling(225, min_periods=1).mean().to_numpy()
+                y_smooth = pd.Series(y[st_pt:]).rolling(225, min_periods=1).mean().to_numpy()
                 # Store smoothed data (x is same for all channels)
                 if zaber_x_i is None:
                     zaber_x_i = x_smooth

@@ -8,7 +8,7 @@ import time
 import xlsxwriter
 from pathlib import Path
 from datetime import datetime
-# from zaber_cli import ZaberCLI
+from zaber_cli import ZaberCLI
 # from futek_cli import FUTEKDeviceCLI
 # from zaber_motion import Units
 from settings_window import SettingsWindow
@@ -166,7 +166,8 @@ class MainWindow:
     """
     def navbar(self):
         def open_control():
-            control = ControlWindow(self.root, self)
+            zaber = ZaberCLI()
+            control = ControlWindow(self.root, self, zaber)
         navbar = tk.Frame(self.root, bg="lightblue", width=700, height=32, bd=3, relief=tk.RIDGE)
         navbar.grid(sticky='ew', row=0, column=0, columnspan=8, rowspan=1)
         #self.root.grid_rowconfigure(0, weight=1)
