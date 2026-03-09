@@ -495,7 +495,7 @@ class MainWindow:
         force_idx = 0
         while True:
             # Check if paused during the loop
-            sleep(0.032) # sleep for 32 ms to get ~30 readings per second, also gives time for GUI to update and check for pause
+            #sleep(0.032) # sleep for 32 ms to get ~30 readings per second, also gives time for GUI to update and check for pause
             if self.toggle_pause.get() == 1: # TODO: Right here, we call recalibration script
                 self.warning("Warning: Pausing this run will recalibrate the zaber machine and reset the current run.")
                 

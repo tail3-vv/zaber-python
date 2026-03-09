@@ -15,9 +15,9 @@ def main():
     devices = repo.DetectDevices()
     usb225 = devices[0]  # Assuming the first device is the USB225
     sampling_rates = usb225.GetChannelXSamplingRatePossibleValues(0)
-
+    print([x for x in sampling_rates])
     # Set sampling rate to 5 samples per second. This is only used for this example.
-    usb225.SetChannelXSamplingRate(0, next(x for x in sampling_rates if x == "20"))
+    usb225.SetChannelXSamplingRate(0, next(x for x in sampling_rates if x == "100"))
 
     # Must run pre-streaming operations before using GetStreamingDataConverted or GetStreamingData.
     print("Running pre-streaming operations...")
