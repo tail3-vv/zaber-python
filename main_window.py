@@ -4,18 +4,18 @@ from tkinter import ttk
 from tkinter import filedialog as fd
 from tkinter import scrolledtext
 import numpy as np
-import time
+from time import sleep
 import xlsxwriter
 from pathlib import Path
 from datetime import datetime
 from zaber_cli import ZaberCLI
-# from futek_cli import FUTEKDeviceCLI
-# from zaber_motion import Units
+from futek_cli import FUTEKDeviceCLI
+from zaber_motion import Units
 from settings_window import SettingsWindow
 from shear_window import ShearWindow
 from control_window import ControlWindow
 from em_analysis import EMAnalysis
-# from shear_analysis import ShearAnalysis
+from shear_analysis import ShearAnalysis
 
 """
 File where mainloop is executed.
@@ -134,9 +134,9 @@ class MainWindow:
         
         # Run Test function and update textbox according to progress
         self.update_textbox(f"Beginning run {current_run}")
-        state = self.test_funct(n_runs, current_run, self.saved_path.get(), 
-                                self.sensor_id.get(), self.zaber_comport.get())
-        # state = self.run_tests(n_runs, current_run, self.zaber_comport.get())
+        # state = self.test_funct(n_runs, current_run, self.saved_path.get(), 
+        #                         self.sensor_id.get(), self.zaber_comport.get())
+        state = self.run_tests(n_runs, current_run, self.zaber_comport.get())
         
         # Check if run was paused or completed
         is_paused = current_run == state
@@ -495,6 +495,7 @@ class MainWindow:
         force_idx = 0
         while True:
             # Check if paused during the loop
+            sleep(0.032) # sleep for 32 ms to get ~30 readings per second, also gives time for GUI to update and check for pause
             if self.toggle_pause.get() == 1: # TODO: Right here, we call recalibration script
                 self.warning("Warning: Pausing this run will recalibrate the zaber machine and reset the current run.")
                 
@@ -523,7 +524,7 @@ class MainWindow:
             stage_force = reading_force - init_val
             force_readings[force_idx] = stage_force
             force_idx = force_idx + 1
-            #print("Force Value: " + str(stage_force))
+            print("Force Value: " + str(stage_force))
 
             # Once sample is hit, stop the axis
             if stage_force >= upper_limit:

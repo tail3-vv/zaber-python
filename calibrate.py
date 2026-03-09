@@ -13,7 +13,7 @@ Check device manager -> Ports (COM & LPT) to see which connection works
 """
 def calibrate():
     cli = ZaberCLI()
-    connection = cli.connect(comport="COM7")
+    connection = cli.connect(comport="COM4")
     if connection == 0:
         print("Cannot Connect to Zaber comport")
         return 
