@@ -24,7 +24,7 @@ class EMAnalysis():
         self.sensor_id = sensor_id
         self.path = Path(path).parent # this is because Path(path) is in fut folder
         self.sensor_type = sensor_type
-        print(self.path)
+        # print(self.path)
         
         # Initialize channel order based on sensor type
         if sensor_type == 1:
@@ -41,7 +41,7 @@ class EMAnalysis():
         csv_files = sorted(self.cap_path.glob("*.csv"))
         xlsx_files = sorted(self.fut_path.glob("*.xlsx"))
         self.cap_size = len(csv_files)
-        print(self.cap_path)
+        # print(self.cap_path)
 
         # Load data
         self.cap, self.fut = self._create_data(csv_files, xlsx_files)
@@ -133,6 +133,7 @@ class EMAnalysis():
             # There is NaN values in the CAP time column, which mess up the interpolation
             # We need to remove these NaN values before interpolation
             cap_time = self.cap[i].iloc[:, 0].values
+            # print(cap_time)
             valid_mask = ~np.isnan(cap_time)  # Boolean mask of non-NaN values
             
             cap_time_clean = cap_time[valid_mask]
@@ -167,8 +168,8 @@ class EMAnalysis():
             
             # Interpolate FUT
             fut_interp = np.interp(t_f_i, elapsed, self.fut[i].iloc[:, 1])
-            print(elapsed[:5])
-            print(cap_time_clean[:5])
+            # print(elapsed[:5])
+            # print(cap_time_clean[:5])
             # Store results
             self.run.append([cap_interp, fut_interp])
 
@@ -306,13 +307,28 @@ class EMAnalysis():
                 # Smooth data (using moving average with window=100)
                 st_pt = np.where(x-0 > 0)[0][0]
 
-                # # Smooth x and y
-                # x_smooth = uniform_filter1d(x[st_pt:], size=100, mode='nearest')
-                # y_smooth = uniform_filter1d(y[st_pt:], size=100, mode='nearest')
-                # x_smooth = savgol_filter(x[st_pt:], 75, 2)
-                # y_smooth = savgol_filter(y[st_pt:], 75, 2)
-                x_smooth = pd.Series(x[st_pt:]).rolling(225, min_periods=1).mean().to_numpy()
-                y_smooth = pd.Series(y[st_pt:]).rolling(225, min_periods=1).mean().to_numpy()
+                # # # Smooth x and y
+                # # x_smooth = uniform_filter1d(x[st_pt:], size=150, mode='nearest')
+                # # y_smooth = uniform_filter1d(y[st_pt:], size=150, mode='nearest')
+                # # x_smooth = savgol_filter(x[st_pt:], window_length=101, polyorder=2)
+                # # y_smooth = savgol_filter(y[st_pt:], window_length=101, polyorder=2)
+                # x_smooth = pd.Series(x[st_pt:]).rolling(225, min_periods=1).mean().to_numpy()
+                # y_smooth = pd.Series(y[st_pt:]).rolling(225, min_periods=1).mean().to_numpy()
+                
+                # Use a dynamic variable window size approach 
+                noise_level = np.std(np.diff(y))
+                base_window = 100
+                multiplier = 105000
+                # Example scaling: window increases by 100 for every 0.05 pF of noise
+                dynamic_window = int(base_window + (noise_level - 0.0014) * multiplier)
+                dynamic_window = max(base_window, min(dynamic_window, 275)) # Keep it between 100 and 600
+
+                print(f"Run {i+1}, CH {j+1}: Noise Level {noise_level:.4f} -> Using Window {dynamic_window}")
+
+                # 3. Apply the dynamic smoothing to x and y
+                x_smooth = pd.Series(x[st_pt:]).rolling(window=dynamic_window, min_periods=1, center=True).mean().to_numpy()
+                y_smooth = pd.Series(y[st_pt:]).rolling(window=dynamic_window, min_periods=1, center=True).mean().to_numpy()
+
                 # Store smoothed data (x is same for all channels)
                 if zaber_x_i is None:
                     zaber_x_i = x_smooth
@@ -343,7 +359,60 @@ class EMAnalysis():
                 else:
                     locz_ij = None
                     valz_ij = None
+                
+                """
+                from scipy.interpolate import UnivariateSpline
+                # Use a spline fitting approach for smoothing
+                # ... inside your CH loop ...
+                x_raw = self.test[i][1][k:f, 1]
+                y_raw = self.test[i][0][k:f, j+1]
 
+                # 1. Sort and Handle Duplicates
+                # We convert to a DataFrame to make grouping and averaging easy
+                df_temp = pd.DataFrame({'x': x_raw, 'y': y_raw}).sort_values('x')
+                df_clean = df_temp.groupby('x').mean().reset_index()
+
+                x = df_clean['x'].to_numpy()
+                y = df_clean['y'].to_numpy()
+
+                # 2. Check for the "Strictly Increasing" condition
+                if len(x) < 4: # Splines need at least k+1 points
+                    print(f"Skipping CH {j+1}: Not enough data points.")
+                    continue
+
+                # 3. Proceed with Spline
+                # Recalculate your noise based on the cleaned data
+                noise_std = np.std(np.diff(y)) 
+                s_factor = len(y) * (noise_std**2) * 7  # Adjust the multiplier as needed based on empirical results
+
+                try:
+                    spline = UnivariateSpline(x, y, s=s_factor, k=3)
+                    y_smooth = spline(x)
+                    fir_dev_ij = spline.derivative(n=1)(x)
+                    x_smooth = x
+                except Exception as e:
+                    print(f"Spline failed for CH {j+1}: {e}")
+                    # Fallback to simple logic if needed
+                    continue
+
+                if zaber_x_i is None:
+                    zaber_x_i = x_smooth
+                zaber_y_i.append(y_smooth)
+                peaks, _ = find_peaks(fir_dev_ij, prominence=0.01)
+
+                # peaks, properties = find_peaks(fir_dev_ij, 
+                #             prominence=0.08,
+                #             width=300)
+
+                if len(peaks) > 0:
+                    # Select the highest peak in the derivative (the steepest inflection)
+                    max_idx = peaks[np.argmax(fir_dev_ij[peaks])]
+                    locz_ij = max_idx
+                    valz_ij = fir_dev_ij[max_idx]
+                else:
+                    locz_ij, valz_ij = None, None
+                # end spline fitting approach
+                """
                 ### Second round of filter: set values > max peak to 0
                 if valz_ij is not None:
                     fir_dev_ij[fir_dev_ij > valz_ij] = 0
@@ -399,13 +468,13 @@ class EMAnalysis():
                 if locz_ij is not None:
                     ax2.plot(x_smooth[locz_ij], fir_dev_ij[locz_ij], 'ok', 
                             markersize=8, linewidth=2, label='Max Slope')
-                print(x_smooth[locz_ij],', ',fir_dev_ij[locz_ij])
+                # print(x_smooth[locz_ij],', ',fir_dev_ij[locz_ij])
             
                 ax2.set_ylabel('1st Derivative (pF/kPa)', fontsize=10, color='tab:orange')
                 ax2.tick_params(axis='y', labelcolor='tab:orange')
                 
                 ax.grid(True, alpha=0.3)
-            print('---')
+            # print('---')
             # Store data for this run
             self.zaber_x.append(zaber_x_i)
             self.zaber_y.append(zaber_y_i)
@@ -430,7 +499,7 @@ class EMAnalysis():
         fig.suptitle('P.S Curves of All CHs Across Runs', fontsize=16, fontweight='bold')
 
         for i in range(self.cap_size):
-            print(f"Processing run {i+1}/{self.cap_size}...")
+            # print(f"Processing run {i+1}/{self.cap_size}...")
             
             for j in range(self.ch):
                 # Find start point
@@ -476,6 +545,7 @@ class EMAnalysis():
         for i in range(num_runs):
             for j in range(self.ch):
                 # Plot P.S curve for run i, channel j
+                print(f"Plotting Run {i+1}, CH {j+1} with color {colors[i]}")
                 axes[j].plot(self.zaber_x[i], self.zaber_y[i][j], '-', 
                             linewidth=2.5, 
                             color=colors[i],
