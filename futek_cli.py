@@ -30,7 +30,7 @@ class FUTEKDeviceCLI:
         self.SamplingRate = FUTEK.Devices.DeviceUSB225.GetChannelXSamplingRate(self.USB225, 0)
         # available sampling rates: ['2.5', '5', '10', '16.6', '20', '50', '60', '100', '400', '1200', '2400', '4800']
         print(f"Sampling Rate: {self.SamplingRate} Hz")
-        self.USB225.SetChannelXSamplingRate(0, "60") # Set sampling rate to 60 hz to adjust to python's loop speed
+        self.USB225.SetChannelXSamplingRate(0, "100") # Set sampling rate to 60 hz to adjust to python's loop speed
 
         self.NormalData = FUTEK.Devices.DeviceUSB225.GetChannelXReading(self.USB225, 0)
         print(f"Sensor Reading: {self.NormalData:.3f}")

@@ -17,7 +17,7 @@ def main():
     sampling_rates = usb225.GetChannelXSamplingRatePossibleValues(0)
     print([x for x in sampling_rates])
     # Set sampling rate to 5 samples per second. This is only used for this example.
-    usb225.SetChannelXSamplingRate(0, next(x for x in sampling_rates if x == "100"))
+    usb225.SetChannelXSamplingRate(0, next(x for x in sampling_rates if x == "20"))
 
     # Must run pre-streaming operations before using GetStreamingDataConverted or GetStreamingData.
     print("Running pre-streaming operations...")
