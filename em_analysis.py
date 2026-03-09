@@ -312,9 +312,9 @@ class EMAnalysis():
                 # # y_smooth = uniform_filter1d(y[st_pt:], size=150, mode='nearest')
                 # # x_smooth = savgol_filter(x[st_pt:], window_length=101, polyorder=2)
                 # # y_smooth = savgol_filter(y[st_pt:], window_length=101, polyorder=2)
-                # x_smooth = pd.Series(x[st_pt:]).rolling(225, min_periods=1).mean().to_numpy()
-                # y_smooth = pd.Series(y[st_pt:]).rolling(225, min_periods=1).mean().to_numpy()
-                
+                x_smooth = pd.Series(x[st_pt:]).rolling(100, min_periods=1).mean().to_numpy()
+                y_smooth = pd.Series(y[st_pt:]).rolling(100, min_periods=1).mean().to_numpy()
+                """
                 # Use a dynamic variable window size approach 
                 noise_level = np.std(np.diff(y))
                 base_window = 100
@@ -328,7 +328,7 @@ class EMAnalysis():
                 # 3. Apply the dynamic smoothing to x and y
                 x_smooth = pd.Series(x[st_pt:]).rolling(window=dynamic_window, min_periods=1, center=True).mean().to_numpy()
                 y_smooth = pd.Series(y[st_pt:]).rolling(window=dynamic_window, min_periods=1, center=True).mean().to_numpy()
-
+                """
                 # Store smoothed data (x is same for all channels)
                 if zaber_x_i is None:
                     zaber_x_i = x_smooth
@@ -413,6 +413,7 @@ class EMAnalysis():
                     locz_ij, valz_ij = None, None
                 # end spline fitting approach
                 """
+                
                 ### Second round of filter: set values > max peak to 0
                 if valz_ij is not None:
                     fir_dev_ij[fir_dev_ij > valz_ij] = 0
