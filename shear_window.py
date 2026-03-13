@@ -114,7 +114,8 @@ class ShearWindow(tk.Toplevel):
         # Initialize Load Cell and read initial values
         self.futek = FUTEKDeviceCLI()
         reading_force = self.futek.getNormalData() 
-        reading_force = reading_force * (-4.44822) # convert pounds to Newtons and change polarity
+        # 4.44822 Should be positive for shear testing due to the orientation of the load cell
+        reading_force = reading_force * (4.44822) # convert pounds to Newtons and change polarity
         self.init_val = reading_force 
         self.init_force = 0
         self.force_readings = []
@@ -157,7 +158,8 @@ class ShearWindow(tk.Toplevel):
         self.time_readings.append(elapsed_time)
         # Read force values on load cell
         reading_force = self.futek.getNormalData() 
-        reading_force = reading_force * (-4.44822) # convert pounds to Newtons and change polarity
+        # 4.44822 Should be positive for shear testing due to the orientation of the load cell
+        reading_force = reading_force * (4.44822) # convert pounds to Newtons and change polarity
         stage_force = reading_force - self.init_val
 
         # Append force readings to y axis
