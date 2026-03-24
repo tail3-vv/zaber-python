@@ -1,6 +1,8 @@
 import tkinter as tk
 from tkinter import ttk
 import serial.tools.list_ports
+from zaber_motion import Units
+from zaber_cli import ZaberCLI
 """
 Skeleton framework for an analysis window that would allow the user to view
 any related analysis files without having to open a file manager
@@ -30,11 +32,12 @@ class ControlWindow(tk.Frame):
             self.window.grid_columnconfigure(i, weight=1)
         
         # TODO: Set the default to Zaber current position
+        self.zaber = ZaberCLI()
         self.default_pos = tk.IntVar(value=17)
-        self.position = tk.IntVar(value=0)
-        self.min_pos = tk.IntVar(value=0) # we should trace this value because min < max
-        self.max_pos = tk.IntVar(value=50) # we should trace this value because max > min
-        self.speed = tk.IntVar(value=1) # we should trace this value because it shouldnt go too fast
+        self.position = tk.IntVar(value=17)
+        self.min_pos = tk.IntVar(value=17) # we should trace this value because min < max
+        self.max_pos = tk.IntVar(value=40) # we should trace this value because max > min
+        self.speed = tk.DoubleVar(value=0.5) # we should trace this value because it shouldnt go too fast
         self.zaber_comport = tk.StringVar(value="")
         self.widgets = [] # hold all widgets in a list (to be enabled when zaber is connected)
 
@@ -62,6 +65,58 @@ class ControlWindow(tk.Frame):
         # then here we allow all widgets
         for w in self.widgets:
             w.config(state=tk.NORMAL)
+        print(f"Selected Zaber Comport: {self.zaber_comport.get()}")
+        self.zaber.connect(self.zaber_comport.get())
+        pos = self.zaber.axis.get_position()
+        pos = (pos* 0.04765) / 1000 # convert from microsteps to mm
+        self.position.set(pos)
+
+    def save_inputs(self):
+        print(f"Position changed to: {self.position.get()}")
+        if self.position.get() < self.min_pos.get():
+            self.position.set(self.min_pos.get())
+        elif self.position.get() > self.max_pos.get():
+            self.position.set(self.max_pos.get())
+        self.zaber.axis.move_absolute(self.position.get(), Units.LENGTH_MILLIMETRES)
+
+        min_pos = self.min_pos.get()
+        print(f"Min position changed to: {min_pos}")
+        if min_pos >= self.max_pos.get():
+            self.min_pos.set(min_pos - 1)
+
+        max_pos = self.max_pos.get()
+        print(f"Max position changed to: {max_pos}")
+        if self.max_pos.get() <= self.min_pos.get():
+            self.max_pos.set(self.min_pos.get() + 1)
+        
+        if self.min_pos.get() < 17:
+            self.min_pos.set(17)
+        if self.max_pos.get() > 40:
+            self.max_pos.set(40)
+
+        # print(f"Speed changed to: {self.speed.get()}")
+        # speed = self.speed.get()
+        # if speed < 0.1:
+        #     speed = 0.1
+        #     self.speed.set(speed)
+        # elif speed > 2:
+        #     speed = 2
+        #     self.speed.set(speed)
+        # self.zaber.axis.move_velocity(speed, Units.VELOCITY_MILLIMETRES_PER_SECOND)
+
+    def home_axis(self):
+        default_pos = self.default_pos.get()
+        print(f"Homing axis to default position: {default_pos} mm")
+        self.zaber.axis.move_absolute(default_pos, Units.LENGTH_MILLIMETRES)
+        self.position.set(default_pos)
+    
+    def park_axis(self):
+        if not self.zaber.axis.is_parked():
+            print("Parking axis")
+            self.zaber.axis.park()
+        else:
+            print("Unparking axis")
+            self.zaber.axis.unpark()
 
     def navbar(self):
         def back_to_main():
@@ -211,22 +266,22 @@ class ControlWindow(tk.Frame):
         frame.grid(sticky='ew', row=3, column=6, rowspan=5, columnspan=3)
 
         # Speed
-        speed_pos_label = tk.Label(frame, text="Speed")
-        speed_pos_input = tk.Entry(frame, textvariable=self.speed, width=10)
-        speed_pos_units = tk.Label(frame, text="mm/s")
+        # speed_pos_label = tk.Label(frame, text="Speed")
+        # speed_pos_input = tk.Entry(frame, textvariable=self.speed, width=10)
+        # speed_pos_units = tk.Label(frame, text="mm/s")
 
-        speed_pos_label.grid(sticky='ew', row=0, column=0)
-        speed_pos_input.grid(sticky='ew', row=0, column=1)
-        speed_pos_units.grid(sticky='ew', row=0, column=2)
+        # speed_pos_label.grid(sticky='ew', row=0, column=0)
+        # speed_pos_input.grid(sticky='ew', row=0, column=1)
+        # speed_pos_units.grid(sticky='ew', row=0, column=2)
 
         self._create_comport_selection(frame)
-        self.widgets.extend([speed_pos_input])
+        # self.widgets.extend([speed_pos_input])
 
     def _create_comport_selection(self, parent):
         """Selection box for zaber comports"""
         zaber_label = tk.Label(parent, text="Zaber Comport:")
         zaber_combobox = ttk.Combobox(parent, 
-                                       values=['test', 'test2'],
+                                       values=[port.device for port in serial.tools.list_ports.comports()],
                                        state='readonly', textvariable=self.zaber_comport, width=15)
         # [port.device for port in serial.tools.list_ports.comports()]
         zaber_combobox.set('Select Comport')
@@ -243,15 +298,15 @@ class ControlWindow(tk.Frame):
         Reset axis/defaults
         """
         frame = tk.Frame(self.window, bg=self.bg)
-        frame.grid(sticky='ew', row=6, column=0, columnspan=3)
+        frame.grid(sticky='ew', row=6, column=0, columnspan=8)
         
         # Homing
-        home_btn = tk.Button(frame, text="Home", width=10)
+        home_btn = tk.Button(frame, text="Home", command=self.home_axis, width=10)
         home_btn.grid(sticky='w', row=0, column=0, padx=10)
 
         # Parking
         # TODO: This will need to have a callback function *Pause button flashbacks*
-        park_btn = tk.Button(frame, text="Park", width=10)
+        park_btn = tk.Button(frame, text="Park", command=self.park_axis, width=10)
         park_btn.grid(sticky='w', row=0, column=1, padx=25)
 
         # Calibrate
@@ -259,7 +314,12 @@ class ControlWindow(tk.Frame):
         calibrate_btn = tk.Button(frame, text="Calibrate", width=10)
         calibrate_btn.grid(sticky='w', row=0, column=2, padx=25)
 
-        self.widgets.extend([home_btn, park_btn, calibrate_btn])
+        # Save inputs 
+        save_btn = tk.Button(frame, text="Save Inputs", command=self.save_inputs, width=10)
+        save_btn.grid(sticky='w', row=0, column=3, padx=25)
+
+
+        self.widgets.extend([home_btn, park_btn, calibrate_btn, save_btn])
 
 
 
