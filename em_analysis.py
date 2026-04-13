@@ -18,7 +18,7 @@ class EMAnalysis():
         Parameters:
             path: Path to data directory
             sensor_id: Sensor ID number
-            sensor_type: 1 or 3 (2 is archived)
+            sensor_type: Standard or Inverted
         """
         # Store parameters
         self.sensor_id = sensor_id
@@ -27,9 +27,9 @@ class EMAnalysis():
         # print(self.path)
         
         # Initialize channel order based on sensor type
-        if sensor_type == 1:
+        if sensor_type == "Standard":
             self.ch_order = np.arange(1, 9)
-        elif sensor_type == 3:
+        elif sensor_type == "Inverted":
             self.ch_order = np.array([1, 2, 3, 4, 8, 7, 6, 5])
         else:
             raise ValueError(f"Invalid sensor_type: {sensor_type}")
@@ -181,7 +181,6 @@ class EMAnalysis():
             # Find maximum point which corresponds to when Futek released pressure from sensor (Inflection)
             temp_max_cap = np.max(temp_run[i][0], axis=0) # returns row vector of 8 channels
             self.shorted_ch = np.where(temp_max_cap > 10)[0]  # Find channels where max > 10
-
             # Exclude shorted channel(s) when identifying max CH to sync FUT data
             temp_run[i][0][:,self.shorted_ch] = 0
 
@@ -329,6 +328,7 @@ class EMAnalysis():
                 x_smooth = pd.Series(x[st_pt:]).rolling(window=dynamic_window, min_periods=1, center=True).mean().to_numpy()
                 y_smooth = pd.Series(y[st_pt:]).rolling(window=dynamic_window, min_periods=1, center=True).mean().to_numpy()
                 """
+                
                 # Store smoothed data (x is same for all channels)
                 if zaber_x_i is None:
                     zaber_x_i = x_smooth
@@ -360,7 +360,7 @@ class EMAnalysis():
                     locz_ij = None
                     valz_ij = None
                 
-                """
+                '''
                 from scipy.interpolate import UnivariateSpline
                 # Use a spline fitting approach for smoothing
                 # ... inside your CH loop ...
@@ -412,7 +412,7 @@ class EMAnalysis():
                 else:
                     locz_ij, valz_ij = None, None
                 # end spline fitting approach
-                """
+                '''
                 
                 ### Second round of filter: set values > max peak to 0
                 if valz_ij is not None:
@@ -546,7 +546,7 @@ class EMAnalysis():
         for i in range(num_runs):
             for j in range(self.ch):
                 # Plot P.S curve for run i, channel j
-                print(f"Plotting Run {i+1}, CH {j+1} with color {colors[i]}")
+                # print(f"Plotting Run {i+1}, CH {j+1} with color {colors[i]}")
                 axes[j].plot(self.zaber_x[i], self.zaber_y[i][j], '-', 
                             linewidth=2.5, 
                             color=colors[i],
@@ -577,6 +577,7 @@ class EMAnalysis():
         Calculate and return analysis results as a dictionary.
         Calculates Mean, STD, and COV of P.S and Force at Inflection; Max CAP; Incremental CAP values
         """
+        print("saving data to dict")
         result = {}
         
         # P.S Curve Inflection Point pressure sensitivity and force: mean, std, and cov
@@ -667,6 +668,7 @@ class EMAnalysis():
         result['zaber_x'] = self.zaber_x
         result['zaber_y'] = self.zaber_y
         
+        print("saving data to pickle")
         # save pickle
         with open(self.path / 'eb_analysis_results.pkl', 'wb') as f:
             pickle.dump(result, f)
@@ -703,6 +705,7 @@ class EMAnalysis():
                         pd.DataFrame([repr(val)]).to_excel(writer, sheet_name=sheet_base, index=False)
 
         # use it
+        print("saving pickle to excel")
         pickle_to_excel(self.path / 'eb_analysis_results.pkl', self.path / 'EB_Analysis_Results.xlsx')
 
         return result

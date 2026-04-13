@@ -40,7 +40,7 @@ class MainWindow:
         # Initially these are empty strings
         self.saved_path = tk.StringVar()
         self.sensor_id = tk.StringVar()
-        self.sensor_type = tk.IntVar(value=3) # this is usually 1 or 3, 2 is archived
+        self.sensor_type = tk.StringVar(value="Standard") # Standard, channel order is 1-8
 
         # Initially these are set to 0 unless specified
         self.is_create_files = tk.BooleanVar(value=1) # this is boolean
@@ -225,7 +225,7 @@ class MainWindow:
         # Widget Labels
         label = tk.Label(self.root, text="Sensor Type: ")
         sensor_entry = ttk.Combobox(self.root, textvariable=self.sensor_type, 
-                                   values=["1", "2", "3"], width=5)
+                                   values=["Standard", "Inverted"], width=10)
 
         # Widget positions
         label.grid(sticky='w', row=4, column=0, padx=10,pady=10)
@@ -373,9 +373,10 @@ class MainWindow:
     def perform_analysis(self,*args):
         """Runs analysis in a separate script"""
         test_type = self.test_type.get()
-        sensor_type = int(self.sensor_type.get())
+        sensor_type = self.sensor_type.get()
         if test_type == "EM":
             analysis = EMAnalysis(self.saved_path.get(), self.sensor_id.get(), sensor_type=sensor_type)
+            analysis.save_data()
         elif test_type == "Shear":
             analysis = ShearAnalysis(self.saved_path.get(), self.sensor_id.get())
             analysis.run_full_analysis()
