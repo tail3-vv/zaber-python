@@ -1,15 +1,20 @@
+import cmd
 import tkinter as tk
 from tkinter import Tk
 from tkinter import ttk
 from tkinter import filedialog as fd
 from tkinter import scrolledtext
 import numpy as np
-from time import sleep
+import subprocess
+import sys
+import signal
+import os
 import xlsxwriter
+from time import sleep
 from pathlib import Path
 from datetime import datetime
 from zaber_cli import ZaberCLI
-from futek_cli import FUTEKDeviceCLI
+# from futek_cli import FUTEKDeviceCLI
 from zaber_motion import Units
 from settings_window import SettingsWindow
 from shear_window import ShearWindow
@@ -134,9 +139,9 @@ class MainWindow:
         
         # Run Test function and update textbox according to progress
         self.update_textbox(f"Beginning run {current_run}")
-        # state = self.test_funct(n_runs, current_run, self.saved_path.get(), 
-        #                         self.sensor_id.get(), self.zaber_comport.get())
-        state = self.run_tests(n_runs, current_run, self.zaber_comport.get())
+        state = self.test_funct(n_runs, current_run, self.saved_path.get(), 
+                                self.sensor_id.get(), self.zaber_comport.get())
+        # state = self.run_tests(n_runs, current_run, self.zaber_comport.get())
         
         # Check if run was paused or completed
         is_paused = current_run == state
@@ -432,27 +437,61 @@ class MainWindow:
         #     worksheet.write(index+1, 0, index + 1)
         #     worksheet.write(index+1, 1, force_readings[index])
         # workbook.close()
-        
-        if current_run < n_runs:
-            for i in range(1):
-                # Check if paused during the loop
-                if self.toggle_pause.get() == 1: # TODO: Right here, we call recalibration script
-                    self.warning("Warning: Pausing this run will recalibrate the zaber machine and reset the current run.")
-                    
-                    if self.is_warning_cancel.get() == 0:
+        cmd = [sys.executable, 'jlink.py', folder_path, str(current_run)] # this is the command to run the test script. The second argument is the path where the data will be saved, and the third argument is the run number
+        creationflags = subprocess.CREATE_NEW_PROCESS_GROUP if os.name == 'nt' else 0
+        proc = subprocess.Popen(
+        cmd,
+        creationflags=creationflags,
+        )
+
+        try:
+            sleep(1) # Give the subprocess a moment to start
+        finally:
+            print("Main Script starting")
+            if current_run < n_runs:
+                for i in range(1):
+                    # Check if paused during the loop
+                    if self.toggle_pause.get() == 1: 
+                        self.warning("Warning: Pausing this run will recalibrate the zaber machine and reset the current run.")
+                        
+                        if self.is_warning_cancel.get() == 0:
+                            return current_run # Return same run number to resume from where we left off
+                        self.toggle_pause.set(0)
+                    sleep(1)
+                self.root.update()  # Keep GUI responsive
+                if os.name == 'nt':
+                    proc.send_signal(signal.CTRL_BREAK_EVENT)
+                else:
+                    proc.terminate() # ends subprocess
+
+                # now wait for subprocess to cleanup
+                try:
+                    proc.wait(timeout=10)
+                    print("Subprocess exited cleanly")
+                except subprocess.TimeoutExpired:
+                    print("Subprocess took to long. Killing script")
+                    proc.kill()
+                return int(current_run) + 1
+            elif current_run == n_runs:
+                for i in range(1):
+                    # Check if paused during the loop
+                    if self.toggle_pause.get() == 1: 
                         return current_run # Return same run number to resume from where we left off
-                    self.toggle_pause.set(0)
-                time.sleep(1)
-                self.root.update()  # Keep GUI responsive
-            return int(current_run) + 1
-        elif current_run == n_runs:
-            for i in range(1):
-                # Check if paused during the loop
-                if self.toggle_pause.get() == 1:  # TODO: Right here, we call recalibration script
-                    return current_run # Return same run number to resume from where we left off
-                time.sleep(1)
-                self.root.update()  # Keep GUI responsive
-            return int(current_run) + 1
+                    sleep(1)
+                    self.root.update()  # Keep GUI responsive
+                if os.name == 'nt':
+                    proc.send_signal(signal.CTRL_BREAK_EVENT)
+                else:
+                    proc.terminate() # ends subprocess
+
+                # now wait for subprocess to cleanup
+                try:
+                    proc.wait(timeout=10)
+                    print("Subprocess exited cleanly")
+                except subprocess.TimeoutExpired:
+                    print("Subprocess took to long. Killing script")
+                    proc.kill()
+                return int(current_run) + 1
     """
     Big Testing function
     """
@@ -471,6 +510,16 @@ class MainWindow:
             return 
         # Futek Load Cell setup
         futek = FUTEKDeviceCLI()
+
+        # Vena Vitals Sensor setup
+        savepath = self.saved_path.get()
+        cmd = [sys.executable, 'jlink.py', savepath, str(current_run)] # this is the command to run the test script. The second argument is the path where the data will be saved, and the third argument is the run number
+
+        creationflags = subprocess.CREATE_NEW_PROCESS_GROUP if os.name == 'nt' else 0
+        proc = subprocess.Popen(
+            cmd,
+            creationflags=creationflags,
+        )
 
         # Move 12.75 before cycle
         # Keep constant:setting gap distance between base with sensor to tip to 1.5mm
@@ -569,12 +618,26 @@ class MainWindow:
             if last_position <= (currentPosition*0.047625)/1000:
                 zaber.axis.stop()
                 break
-
+            
         # move back to original position
         if zaber.axis.is_parked():
             zaber.axis.unpark()
         zaber.axis.move_absolute(17, Units.LENGTH_MILLIMETRES)
         #print("Run " + str(run_idx) + " completed")
+
+        # Save data to cap file and kill subprocess
+        if os.name == 'nt':
+            proc.send_signal(signal.CTRL_BREAK_EVENT)
+        else:
+            proc.terminate() # ends subprocess
+
+        # now wait for subprocess to cleanup
+        try:
+            proc.wait(timeout=10)
+            print("Subprocess exited cleanly")
+        except subprocess.TimeoutExpired:
+            print("Subprocess took to long. Killing script")
+            proc.kill()
 
         # Save data to run file
         # We could make this a separate function
