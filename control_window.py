@@ -3,72 +3,62 @@ from tkinter import ttk
 import serial.tools.list_ports
 from zaber_motion import Units
 from zaber_cli import ZaberCLI
+
 """
-Skeleton framework for an analysis window that would allow the user to view
-any related analysis files without having to open a file manager
-Currently not being used.
+Separate window for manually controlling the Zaber stage.
+Lives as an overlay on top of the main window.
 """
 
+
 class ControlWindow(tk.Frame):
-    """ Separate window for looking at control panel"""
 
     def __init__(self, root, main_window, zaber):
         super().__init__(root)
         self.root = root
         self.main_window = main_window
-        self.zaber = zaber # to interact with the zaber CLI
-        self.bg = None# "#cce7ff"
-        # Create an overlay Frame that covers the entire root window.
-        # Use place with relwidth/relheight so it always fills the window.
-        self.window = tk.Frame(self.root, bg=self.bg)
+        self.zaber = zaber
+
+        # overlay frame fills the root, picks up the page bg
+        self.window = tk.Frame(self.root, bg="#eef2f7")
         self.window.place(relx=0, rely=0, relwidth=1, relheight=1)
-        # Ensure overlay is above other widgets
         try:
             self.window.lift()
         except Exception:
             pass
-        # Allow grid-managed children inside this overlay to expand
-        for i in range(8):
-            self.window.grid_columnconfigure(i, weight=1)
-        
-        # TODO: Set the default to Zaber current position
+
+        # zaber state
         self.zaber = ZaberCLI()
         self.default_pos = tk.IntVar(value=17)
         self.position = tk.IntVar(value=17)
-        self.min_pos = tk.IntVar(value=17) # we should trace this value because min < max
-        self.max_pos = tk.IntVar(value=40) # we should trace this value because max > min
-        self.speed = tk.DoubleVar(value=0.5) # we should trace this value because it shouldnt go too fast
+        self.min_pos = tk.IntVar(value=17)
+        self.max_pos = tk.IntVar(value=40)
+        self.speed = tk.DoubleVar(value=0.5)
         self.zaber_comport = tk.StringVar(value="")
-        self.widgets = [] # hold all widgets in a list (to be enabled when zaber is connected)
+        # widgets disabled until a comport is picked
+        self.widgets = []
 
-        #self.window.grid_columnconfigure(0, weight=1)
-        #self.root.grid_columnconfigure(1, weight=1)
-        self.navbar()
-        self.header()
-        self.remote()
-        self.input_fields_pos()
-        self.input_fields_other()
-        self.create_buttons()
-        self.zaber_comport.trace('w', self.trace_comport)
+        self._create_widgets()
 
-        separator = ttk.Separator(self.window)
-        # separator.grid(sticky="w", row=4, column=1, pady=10)
-        separator.place(x=0, y=350, relwidth=1)
-
-        # Initially disable all widgets until user has picked a zaber comport
+        # everything starts disabled until a comport is chosen
         for w in self.widgets:
-            w.config(state=tk.DISABLED)
-    
+            try:
+                w.config(state=tk.DISABLED)
+            except tk.TclError:
+                pass
+
+        self.zaber_comport.trace_add('write', self.trace_comport)
+
+    # logic — unchanged behaviour from original file
     def trace_comport(self, *args):
-        
-        # if comport is the valid zaber comport
-        # then here we allow all widgets
         for w in self.widgets:
-            w.config(state=tk.NORMAL)
+            try:
+                w.config(state=tk.NORMAL)
+            except tk.TclError:
+                pass
         print(f"Selected Zaber Comport: {self.zaber_comport.get()}")
         self.zaber.connect(self.zaber_comport.get())
         pos = self.zaber.axis.get_position()
-        pos = (pos* 0.04765) / 1000 # convert from microsteps to mm
+        pos = (pos * 0.04765) / 1000
         self.position.set(pos)
 
     def save_inputs(self):
@@ -88,28 +78,18 @@ class ControlWindow(tk.Frame):
         print(f"Max position changed to: {max_pos}")
         if self.max_pos.get() <= self.min_pos.get():
             self.max_pos.set(self.min_pos.get() + 1)
-        
+
         if self.min_pos.get() < 17:
             self.min_pos.set(17)
         if self.max_pos.get() > 40:
             self.max_pos.set(40)
-
-        # print(f"Speed changed to: {self.speed.get()}")
-        # speed = self.speed.get()
-        # if speed < 0.1:
-        #     speed = 0.1
-        #     self.speed.set(speed)
-        # elif speed > 2:
-        #     speed = 2
-        #     self.speed.set(speed)
-        # self.zaber.axis.move_velocity(speed, Units.VELOCITY_MILLIMETRES_PER_SECOND)
 
     def home_axis(self):
         default_pos = self.default_pos.get()
         print(f"Homing axis to default position: {default_pos} mm")
         self.zaber.axis.move_absolute(default_pos, Units.LENGTH_MILLIMETRES)
         self.position.set(default_pos)
-    
+
     def park_axis(self):
         if not self.zaber.axis.is_parked():
             print("Parking axis")
@@ -118,212 +98,235 @@ class ControlWindow(tk.Frame):
             print("Unparking axis")
             self.zaber.axis.unpark()
 
-    def navbar(self):
+    # small helpers that mirror main_window
+    def _info_icon(self, parent, tooltip_text):
+        lbl = ttk.Label(parent, text="ⓘ", style="Info.TLabel", cursor="hand2")
+        self._attach_tooltip(lbl, tooltip_text)
+        return lbl
+
+    def _attach_tooltip(self, widget, text):
+        tooltip = tk.Toplevel(widget)
+        tooltip.withdraw()
+        tooltip.overrideredirect(True)
+        tk.Label(tooltip, text=text, bg="#fff7e6", fg="#3b3f47",
+                 padx=10, pady=6, relief="solid", borderwidth=1,
+                 wraplength=320, justify="left",
+                 font=("Helvetica", 9)).pack()
+
+        def show(_):
+            x = widget.winfo_rootx() + 20
+            y = widget.winfo_rooty() + 22
+            tooltip.geometry(f"+{x}+{y}")
+            tooltip.deiconify()
+
+        def hide(_):
+            tooltip.withdraw()
+
+        widget.bind("<Enter>", show)
+        widget.bind("<Leave>", hide)
+
+    def _labeled(self, parent, text, tooltip):
+        row = ttk.Frame(parent, style="Card.TFrame")
+        row.pack(anchor="w", fill="x")
+        ttk.Label(row, text=text, style="FieldLabel.TLabel").pack(side="left")
+        if tooltip:
+            self._info_icon(row, tooltip).pack(side="left", padx=(6, 0))
+        return row
+
+    def _position_field(self, parent, var, label_text, tooltip):
+        # one row: label + entry + 'mm' suffix, height matched with mm² in main page
+        self._labeled(parent, label_text, tooltip)
+        row = ttk.Frame(parent, style="Card.TFrame")
+        row.pack(fill="x", pady=(6, 12))
+        entry = ttk.Entry(row, textvariable=var, style="Input.TEntry", cursor="xterm")
+        entry.pack(side="left", fill="x", expand=True)
+        ttk.Label(row, text="mm", style="UnitSuffix.TLabel").pack(side="left", padx=(6, 0))
+        self.widgets.append(entry)
+        return entry
+
+    # nav row — plain inline buttons matching the main page
+    def navbar(self, parent):
         def back_to_main():
-            #goes back to main window by closing this frame
             self.window.destroy()
+        row = ttk.Frame(parent)
+        row.pack(fill="x", pady=(0, 12))
+        ttk.Button(row, text='Main Stage', style="Nav.TButton",
+                   command=back_to_main).pack(side="left", padx=(0, 6))
+        ttk.Button(row, text='Control Panel', style="Nav.TButton",
+                   state=tk.DISABLED).pack(side="left")
 
-        navbar = tk.Frame(self.window, bg="lightblue", height=32, bd=3, relief=tk.RIDGE)
-        # Make the navbar expand horizontally across the overlay
-        navbar.grid(sticky='ew', row=0, column=0, columnspan=8, rowspan=1)
+    def _create_widgets(self):
+        # scrollable shell — no visible scrollbar; trackpad scrolling handled by install_mousewheel
+        canvas = tk.Canvas(self.window, bg="#eef2f7", highlightthickness=0, bd=0,
+                           yscrollincrement=8)
+        canvas.pack(side="left", fill="both", expand=True)
 
-        for i in range(50):
-            navbar.columnconfigure(i, weight=1)
+        scroll_frame = ttk.Frame(canvas)
+        window_id = canvas.create_window((0, 0), window=scroll_frame, anchor="nw")
 
-        # Navigation buttons
-        main_btn = tk.Button(navbar, text='Main Stage', command=back_to_main, width=10)
-        control_btn = tk.Button(navbar, text='Control Panel', state=tk.DISABLED, width=10)
+        def on_frame_configure(_):
+            canvas.configure(scrollregion=canvas.bbox("all"))
+        def on_canvas_configure(event):
+            canvas.itemconfig(window_id, width=event.width)
+        scroll_frame.bind("<Configure>", on_frame_configure)
+        canvas.bind("<Configure>", on_canvas_configure)
 
-        # Layout
-        main_btn.grid(sticky='w', row=0, column=0, padx=10)
-        control_btn.grid(sticky='w', row=0, column=1)
+        # remember canvas; mousewheel is installed at the end of widget construction
+        self._canvas = canvas
 
-    def header(self):
-        """
-        Text header label with instructions for this window
-        """
-        bg_color= None#'white'
-        header_frame = tk.Frame(self.window, bg=bg_color)
-        header_frame.grid(sticky='ew', row=1, column=0, columnspan=8, rowspan=3, pady=10)
-        title_label = tk.Label(header_frame, text="Zaber Control Panel", font=("Helvetica", 16), bg=bg_color)
-        subtext_label = tk.Label(header_frame, text="Specify a comport to begin controlling the stage.", bg=bg_color)
-        
-        header_frame.columnconfigure(0, weight=1)
-        title_label.grid(sticky='w', row=0, column=0, padx=10)
-        subtext_label.grid(sticky='w', row=1, column=0, padx=10)
+        def on_destroy(event):
+            if event.widget is self.window:
+                try:
+                    self.main_window.restore_main_mousewheel()
+                except Exception:
+                    pass
+        self.window.bind("<Destroy>", on_destroy)
 
-        # create a separator
-        separator = ttk.Separator(header_frame)
-        separator.grid(sticky="ew", row=2, column=0, columnspan=8, pady=25)
-        #separator.place(x=0, y=y_value, relwidth=1)
-    
-    def remote(self):
-        # Makes the zaber stage using a slider and buttons
-        rem = tk.Frame(self.window, bg=self.bg)
-        rem.grid(sticky='w', row=3, column=0, rowspan=4, columnspan=1, pady=110)
+        container = ttk.Frame(scroll_frame, padding=(20, 14, 20, 14))
+        container.pack(fill="both", expand=True)
 
-        self._create_slider(rem)
-        self._create_updown_btns(rem)
+        # nav buttons
+        self.navbar(container)
 
-    def _create_slider(self, parent):
-        """
-        Vertical slider to control positioning
-        """
-        min = self.min_pos.get()
-        max = self.max_pos.get()
-        slider = tk.Scale(parent, variable=self.position, from_=min, to_=max, orient=tk.VERTICAL, length=150)
-        self.widgets.append(slider)
+        # title row
+        header = ttk.Frame(container)
+        header.pack(fill="x", pady=(0, 12))
+        ttk.Label(header, text="Zaber Control Panel",
+                  style="Title.TLabel").pack(anchor="w")
 
-        slider_label = tk.Label(parent, text="Position")
-        slider_label.grid(sticky='ew', row=0, column=0, padx=12)
-        slider.grid(sticky='ew', row=1, rowspan=6, column=0, padx=10, pady=10)
-    
-    def _create_updown_btns(self, parent):
-        """
-        Up and down buttons to control positioning incrementally
-        """
-        def up():
-            p = self.position 
-            min_ = self.min_pos
-            if p.get() > min_.get():
-                p.set(p.get() - 1)
-        def down():
-            p = self.position
-            max_ = self.max_pos
-            if p.get() < max_.get():
-                p.set(p.get() + 1)
-        
-        btn_frame = tk.Frame(parent)
-        btn_frame.grid(row=2,column=1, pady=30, padx=17)
-        up_btn = tk.Button(btn_frame, command=up, text="^", width=10)
-        down_btn = tk.Button(btn_frame, command=down, text="⌄", width=10)
-        btn_label = tk.Label(btn_frame, text="Increment Position")
-        
-        self.widgets.extend([up_btn, down_btn])
+        # connection card
+        conn_card = tk.Frame(container, bg="#ffffff",
+                             highlightthickness=1,
+                             highlightbackground="#dde2eb",
+                             highlightcolor="#dde2eb")
+        conn_card.pack(fill="x", pady=(0, 14))
+        conn_inner = ttk.Frame(conn_card, padding=(20, 18, 20, 18),
+                               style="Card.TFrame")
+        conn_inner.pack(fill="x")
+        ttk.Label(conn_inner, text="Connection",
+                  style="SectionHeading.TLabel").pack(anchor="w", pady=(0, 10))
 
-        btn_label.grid(sticky='ew', row=1, column=1)
-        up_btn.grid(sticky='ew', row=2, column=1)
-        down_btn.grid(sticky='ew', row=3, column=1)
+        self._labeled(conn_inner, "Zaber COM Port",
+                      "Serial port used to communicate with the Zaber actuator. "
+                      "Select a port to enable the controls below.")
+        comport_row = ttk.Frame(conn_inner, style="Card.TFrame")
+        comport_row.pack(fill="x", pady=(6, 4))
+        ports = [p.device for p in serial.tools.list_ports.comports()]
+        comport_combo = ttk.Combobox(comport_row,
+                                     values=ports,
+                                     state='readonly',
+                                     textvariable=self.zaber_comport,
+                                     style="Input.TCombobox",
+                                     cursor="arrow")
+        if not self.zaber_comport.get():
+            comport_combo.set('Select Comport')
+        comport_combo.pack(fill="x")
 
-    def input_fields_pos(self):
-        """
-        Frame that holds all the input fields such as 
-        Current position
-        Min/Max Position
-        Default Position
-        """
-        frame = tk.Frame(self.window, bg=self.bg)
-        frame.grid(sticky='ew', row=3, column=1, rowspan=5, columnspan=4)
-    
-        # Current position
-        curr_pos_label = tk.Label(frame, text="Current Position")
-        curr_pos_input = tk.Entry(frame, textvariable=self.position, width=10)
-        curr_pos_units = tk.Label(frame, text="mm")
+        def _clear_highlight(event):
+            try:
+                event.widget.selection_clear()
+                event.widget.master.focus_set()
+            except tk.TclError:
+                pass
+        comport_combo.bind("<<ComboboxSelected>>", _clear_highlight)
+        ttk.Label(conn_inner,
+                  text="Connect a port to unlock position controls.",
+                  style="Caption.TLabel").pack(anchor="w", pady=(2, 0))
 
-        curr_pos_label.grid(sticky='ew', row=0, column=0)
-        curr_pos_input.grid(sticky='ew', row=0, column=1)
-        curr_pos_units.grid(sticky='ew', row=0, column=2)
+        # stage position card
+        pos_card = tk.Frame(container, bg="#ffffff",
+                            highlightthickness=1,
+                            highlightbackground="#dde2eb",
+                            highlightcolor="#dde2eb")
+        pos_card.pack(fill="x", pady=(0, 14))
+        pos_inner = ttk.Frame(pos_card, padding=(20, 18, 20, 18),
+                              style="Card.TFrame")
+        pos_inner.pack(fill="x")
+        ttk.Label(pos_inner, text="Stage Position",
+                  style="SectionHeading.TLabel").pack(anchor="w", pady=(0, 10))
 
-        # Min position
-        min_pos_label = tk.Label(frame, text="Min Position")
-        min_pos_input = tk.Entry(frame, textvariable=self.min_pos, width=10)
-        min_pos_units = tk.Label(frame, text="mm")
+        # two-column layout: slider/up-down on the left, position fields on the right
+        two_col = ttk.Frame(pos_inner, style="Card.TFrame")
+        two_col.pack(fill="x")
+        two_col.grid_columnconfigure(0, weight=1, uniform="cp")
+        two_col.grid_columnconfigure(1, weight=1, uniform="cp")
 
-        min_pos_label.grid(sticky='ew', row=1, column=0, pady=25)
-        min_pos_input.grid(sticky='ew', row=1, column=1)
-        min_pos_units.grid(sticky='ew', row=1, column=2)
+        left_col = ttk.Frame(two_col, style="Card.TFrame")
+        left_col.grid(row=0, column=0, sticky="nsew", padx=(0, 16))
+        self._build_slider(left_col)
 
-        # Max position
-        max_pos_label = tk.Label(frame, text="Max Position")
-        max_pos_input = tk.Entry(frame, textvariable=self.max_pos, width=10)
-        max_pos_units = tk.Label(frame, text="mm")
+        right_col = ttk.Frame(two_col, style="Card.TFrame")
+        right_col.grid(row=0, column=1, sticky="nsew")
+        self._position_field(right_col, self.position,
+                             "Current Position",
+                             "Live position of the Zaber actuator in millimetres.")
+        self._position_field(right_col, self.min_pos,
+                             "Min Position",
+                             "Lower travel bound. Slider and entries clamp to this value.")
+        self._position_field(right_col, self.max_pos,
+                             "Max Position",
+                             "Upper travel bound. Slider and entries clamp to this value.")
+        self._position_field(right_col, self.default_pos,
+                             "Default (Home) Position",
+                             "Position returned to when you click Home.")
 
-        max_pos_label.grid(sticky='ew', row=2, column=0)
-        max_pos_input.grid(sticky='ew', row=2, column=1)
-        max_pos_units.grid(sticky='ew', row=2, column=2)
+        # action row lives inside the stage position card, split 50/50 across the row
+        actions = ttk.Frame(pos_inner, style="Card.TFrame")
+        actions.pack(fill="x", pady=(12, 0))
 
-        # Default position
-        default_pos_label = tk.Label(frame, text="Default Position")
-        default_pos_input = tk.Entry(frame, textvariable=self.default_pos, width=10)
-        default_pos_units = tk.Label(frame, text="mm")
+        home_btn = ttk.Button(actions, text="Home", command=self.home_axis,
+                              style="Outline.TButton")
+        home_btn.pack(side="left", fill="x", expand=True, padx=(0, 6))
 
-        default_pos_label.grid(sticky='ew', row=3, column=0, pady=25)
-        default_pos_input.grid(sticky='ew', row=3, column=1)
-        default_pos_units.grid(sticky='ew', row=3, column=2)
+        park_btn = ttk.Button(actions, text="Park", command=self.park_axis,
+                              style="Outline.TButton")
+        park_btn.pack(side="left", fill="x", expand=True, padx=(6, 6))
 
-        self.widgets.extend([curr_pos_input, min_pos_input, max_pos_input,
-                             default_pos_input])
+        calibrate_btn = ttk.Button(actions, text="Calibrate",
+                                   style="Outline.TButton")
+        calibrate_btn.pack(side="left", fill="x", expand=True, padx=(6, 6))
 
-    
-    def input_fields_other(self):
-        """
-        Frame that holds all other input fields not related to positioning
-        Speed
-        Acceleration
-        Comport
-        """
-        frame = tk.Frame(self.window, bg=self.bg)
-        frame.grid(sticky='ew', row=3, column=6, rowspan=5, columnspan=3)
-
-        # Speed
-        # speed_pos_label = tk.Label(frame, text="Speed")
-        # speed_pos_input = tk.Entry(frame, textvariable=self.speed, width=10)
-        # speed_pos_units = tk.Label(frame, text="mm/s")
-
-        # speed_pos_label.grid(sticky='ew', row=0, column=0)
-        # speed_pos_input.grid(sticky='ew', row=0, column=1)
-        # speed_pos_units.grid(sticky='ew', row=0, column=2)
-
-        self._create_comport_selection(frame)
-        # self.widgets.extend([speed_pos_input])
-
-    def _create_comport_selection(self, parent):
-        """Selection box for zaber comports"""
-        zaber_label = tk.Label(parent, text="Zaber Comport:")
-        zaber_combobox = ttk.Combobox(parent, 
-                                       values=[port.device for port in serial.tools.list_ports.comports()],
-                                       state='readonly', textvariable=self.zaber_comport, width=15)
-        # [port.device for port in serial.tools.list_ports.comports()]
-        zaber_combobox.set('Select Comport')
-        zaber_label.grid(sticky='w', row=1, column=0, pady=25)
-        zaber_combobox.grid(sticky='w', row=1, column=1)
-
-    def create_buttons(self):
-        """
-        Create buttons for various zaber functions such as:
-        Homing (goes back to default position)
-        Park/Unpark (Stalls axis)
-        Calibrate (runs calibration script)
-
-        Reset axis/defaults
-        """
-        frame = tk.Frame(self.window, bg=self.bg)
-        frame.grid(sticky='ew', row=6, column=0, columnspan=8)
-        
-        # Homing
-        home_btn = tk.Button(frame, text="Home", command=self.home_axis, width=10)
-        home_btn.grid(sticky='w', row=0, column=0, padx=10)
-
-        # Parking
-        # TODO: This will need to have a callback function *Pause button flashbacks*
-        park_btn = tk.Button(frame, text="Park", command=self.park_axis, width=10)
-        park_btn.grid(sticky='w', row=0, column=1, padx=25)
-
-        # Calibrate
-        # TODO: this will need to have a warning attached since its part of a larger function
-        calibrate_btn = tk.Button(frame, text="Calibrate", width=10)
-        calibrate_btn.grid(sticky='w', row=0, column=2, padx=25)
-
-        # Save inputs 
-        save_btn = tk.Button(frame, text="Save Inputs", command=self.save_inputs, width=10)
-        save_btn.grid(sticky='w', row=0, column=3, padx=25)
-
+        save_btn = ttk.Button(actions, text="Save Inputs",
+                              command=self.save_inputs, style="Primary.TButton")
+        save_btn.pack(side="left", fill="x", expand=True, padx=(6, 0))
 
         self.widgets.extend([home_btn, park_btn, calibrate_btn, save_btn])
 
+        # wire mousewheel scrolling now that every widget under the canvas exists
+        self.main_window.install_mousewheel(self._canvas)
 
+    def _build_slider(self, parent):
+        # vertical slider + up/down increment buttons
+        ttk.Label(parent, text="Position Slider",
+                  style="FieldLabel.TLabel").pack(anchor="w")
 
+        body = ttk.Frame(parent, style="Card.TFrame")
+        body.pack(anchor="w", pady=(6, 0))
 
-    
+        slider = ttk.Scale(body, variable=self.position, orient=tk.VERTICAL,
+                           from_=self.min_pos.get(), to=self.max_pos.get(),
+                           length=180)
+        slider.pack(side="left", padx=(0, 12))
+        self.widgets.append(slider)
 
+        # up/down stack
+        btn_col = ttk.Frame(body, style="Card.TFrame")
+        btn_col.pack(side="left")
+        ttk.Label(btn_col, text="Increment", style="Caption.TLabel").pack(pady=(0, 4))
 
+        def up():
+            if self.position.get() > self.min_pos.get():
+                self.position.set(self.position.get() - 1)
+
+        def down():
+            if self.position.get() < self.max_pos.get():
+                self.position.set(self.position.get() + 1)
+
+        up_btn = ttk.Button(btn_col, text="▲", command=up,
+                            style="Outline.TButton", width=4)
+        up_btn.pack(pady=(0, 4))
+        down_btn = ttk.Button(btn_col, text="▼", command=down,
+                              style="Outline.TButton", width=4)
+        down_btn.pack()
+
+        self.widgets.extend([up_btn, down_btn])

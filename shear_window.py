@@ -1,243 +1,429 @@
-import matplotlib.pyplot as plt
-import matplotlib.animation as animation
-from matplotlib import style
-import matplotlib.ticker as ticker
-
 import tkinter as tk
-from matplotlib.backends.backend_tkagg import (FigureCanvasTkAgg, NavigationToolbar2Tk)
-from matplotlib.figure import Figure
-from matplotlib.animation import FuncAnimation
-import numpy as np
+from tkinter import ttk
 from datetime import datetime
-from futek_cli import FUTEKDeviceCLI
-from pathlib import Path
-import xlsxwriter
-from time import sleep
+import math
+
+import matplotlib
+# tkcairo (vector-quality rendering via pycairo) with tkagg as fallback
+try:
+    matplotlib.use("TkCairo")
+    from matplotlib.backends.backend_tkcairo import FigureCanvasTkCairo as _FigureCanvas
+except Exception:
+    matplotlib.use("TkAgg")
+    from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg as _FigureCanvas
+matplotlib.rcParams["path.simplify"] = True
+matplotlib.rcParams["path.simplify_threshold"] = 0.0
+matplotlib.rcParams["lines.antialiased"] = True
+matplotlib.rcParams["text.antialiased"] = True
+matplotlib.rcParams["figure.dpi"] = 144
+matplotlib.rcParams["savefig.dpi"] = 200
+from matplotlib.figure import Figure
+
 """
-Window for Shear testing live graph
-TODO: Add option to stop and save the graph
-OR just save the graph data once the window closes, including the entire plot
+Shear Testing Window: Feature 1.7 (stories 1.7.1 through 1.7.3).
+Live Force vs Time graph with start / stop / perform analysis controls.
+Preview mode uses a simulated ~1.5 N rise so the gui can be tested 
+without real hardware.
 """
+
+
+def _style_axes_clean(ax, xlabel, ylabel):
+    # clean look 
+    ax.set_xlabel(xlabel, fontsize=9.5, color="#3b3f47", labelpad=4)
+    ax.set_ylabel(ylabel, fontsize=9.5, color="#3b3f47", labelpad=4)
+    ax.tick_params(colors="#5a6473", labelsize=8.5, length=4, width=0.8)
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+    ax.spines["left"].set_color("#cdd3de")
+    ax.spines["bottom"].set_color("#cdd3de")
+    ax.spines["left"].set_linewidth(0.8)
+    ax.spines["bottom"].set_linewidth(0.8)
+    ax.grid(True, which="major", color="#e8ecf2", linewidth=0.7)
+    ax.grid(True, which="minor", color="#f3f5fa", linewidth=0.5)
+    ax.minorticks_on()
+    ax.set_axisbelow(True)
+
+
+STATE_IDLE = "IDLE"
+STATE_READY = "READY"
+STATE_RUNNING = "RUNNING"
+STATE_PAUSED_RESET = "PAUSED_RESET_REQUIRED"
+STATE_COMPLETED = "COMPLETED"
+
+CLOSE_BLOCKING_STATES = (STATE_RUNNING, STATE_PAUSED_RESET)
+
+# preview simulation tuning
+SAMPLE_INTERVAL_MS = 50
+PAUSE_LOCKOUT_MS = 5000
+TARGET_FORCE_N = 1.5
+APPROACH_TAU_S = 1.8  # exponential approach time constant for the ~1.5 N asymptote
+
+
 class ShearWindow(tk.Toplevel):
+
     def __init__(self, parent, main_window):
         super().__init__(parent)
-        self.title("Live Sensor Data")
-        self.geometry("800x600")
+        self.title("Shear Testing Window")
+        # open just inside the upper-left corner, slightly offset from main_window
+        self.geometry("1060x780+0+30")
+        self.minsize(840, 560)
+        self.configure(bg="#eef2f7")
         self.main_window = main_window
-        
-        # Initial vars for plotting load cell data
-        self.fig = Figure(figsize=(5, 4), dpi=100)
-        self.ax = self.fig.add_subplot(111)
-        self.line, = self.ax.plot([], [], 'r-', lw=2, marker=None)
-        self.ax.set_xlim(left=0, right=10)  # Set initial right limit, will autoscale
-        self.curr_xlim = 10
-        self.curr_ylim = 10
-        self.curr_ylim_min = -0.5
-        self.ax.set_ylim(self.curr_ylim_min, self.curr_ylim)
-        self.ax.set_xlabel("Time Elapsed (seconds)")
-        self.ax.set_ylabel("Force (N)")
-        
-        # Text for displaying live sample rate
-        self.sample_rate_text = self.ax.text(
-            0.02, 0.95,
-            "",
-            transform=self.ax.transAxes,
-            verticalalignment='top'
-        )
+        self.grab_set()
 
-        # Format x-axis to show MM:SS format
-        def format_time(x, pos):
-            minutes = int(x // 60)
-            seconds = int(x % 60)
-            return f"{minutes}:{seconds:02d}"
-        self.ax.xaxis.set_major_formatter(ticker.FuncFormatter(format_time))
+        # state machine
+        self.state = STATE_IDLE
+        self._sim_after_id = None
+        self._pause_after_id = None
+        self._sim_started_at = 0.0
+        # live samples for the current run (reset on Start, preserved on Stop)
+        self.run_samples_x = []
+        self.run_samples_y = []
+        # latest completed-or-paused samples (used for analysis)
+        self.latest_samples_x = []
+        self.latest_samples_y = []
+        # tracks whether we have any data yet (enables perform analysis)
+        self.has_data = False
 
-        # This connects Matplotlib and tkinter together
-        self.canvas = FigureCanvasTkAgg(self.fig, master=self)
-        self.canvas.draw()
-
-        # Create navigation toolbar for matplotlib
-        self.toolbar = NavigationToolbar2Tk(self.canvas, self, pack_toolbar=False)
-        self.toolbar.update()
-
-        # Create an end test button
-        self.exit_btn = tk.Button(self, text="Save and Exit", 
-                             command=self.on_close, 
-                             width=15, height=1)
-        
-        # Create a number input box for number of seconds to show on the x-axis
-        self.last_seconds = tk.IntVar(value=15)
-        # Put the label and entry in their own frame so they sit side-by-side
-        self.seconds_frame = tk.Frame(self)
-        self.seconds_label = tk.Label(self.seconds_frame, text="Seconds to Display:")
-        self.seconds_entry = tk.Entry(self.seconds_frame, textvariable=self.last_seconds, width=10)
-
-        # Create a checkbox for showing cumulative time
-        self.is_checked = tk.BooleanVar()
-        self.cumulative_btn = tk.Checkbutton(self.seconds_frame, text="Cumulative Time",
-                                      variable=self.is_checked,
-                                        width=15, height=1)
-        # Checkbox to toggle markers on the plotted line
+        # graph display controls (story 1.7.3)
+        self.last_seconds = tk.IntVar(value=30)
+        self.y_min = tk.DoubleVar(value=0.0)
+        self.y_max = tk.DoubleVar(value=5.0)
         self.show_markers = tk.BooleanVar(value=False)
-        self.markers_btn = tk.Checkbutton(
-            self.seconds_frame,
-            text="Show Markers",
-            variable=self.show_markers,
-            command=self.toggle_markers,
-            width=12,
-            height=1
-        )
-        # Entry to choose how large the axis is scaled
-        self.yaxis_entry_label = tk.Label(self.seconds_frame, text="Y-Axis Limit:")
-        self.yaxis_max_entry = tk.Entry(self.seconds_frame, width=10)
-        self.yaxis_max_entry.insert(0, str(self.curr_ylim))
+        self.cumulative_time = tk.BooleanVar(value=False)
+        # re-render graph when any display setting changes
+        for v in (self.last_seconds, self.y_min, self.y_max,
+                  self.show_markers, self.cumulative_time):
+            v.trace_add("write", self._on_display_setting_changed)
 
-        self.yaxis_min_entry_label = tk.Label(self.seconds_frame, text="Y-Axis Min:")
-        self.yaxis_min_entry = tk.Entry(self.seconds_frame, width=10)
-        self.yaxis_min_entry.insert(0, str(self.curr_ylim_min))
-        
-        # Pack all widgets
-        self.exit_btn.pack(side=tk.BOTTOM, pady=10, padx=10)
-        self.cumulative_btn.pack(side=tk.RIGHT, padx=10)
-        self.markers_btn.pack(side=tk.RIGHT, padx=5)
-        self.seconds_frame.pack(side=tk.BOTTOM, pady=5, padx=5)
-        self.seconds_label.pack(side=tk.LEFT, padx=(0, 5))
-        self.seconds_entry.pack(side=tk.LEFT)
-        self.yaxis_max_entry.pack(side=tk.RIGHT, pady=5, padx=5)
-        self.yaxis_entry_label.pack(side=tk.RIGHT, pady=5, padx=5)
-        self.yaxis_min_entry.pack(side=tk.RIGHT, pady=5, padx=5)
-        self.yaxis_min_entry_label.pack(side=tk.RIGHT, pady=5, padx=5)
-        self.toolbar.pack(side=tk.BOTTOM, fill=tk.X)
-        self.canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+        self.protocol("WM_DELETE_WINDOW", self._on_close_attempt)
+        self.bind("<Escape>", self._on_escape)
 
+        self._create_widgets()
+        self._set_state(STATE_READY)
 
-        # Initialize Load Cell and read initial values
-        self.futek = FUTEKDeviceCLI()
-        reading_force = self.futek.getNormalData() 
-        # 4.44822 Should be positive for shear testing due to the orientation of the load cell
-        reading_force = reading_force * (4.44822) # convert pounds to Newtons and change polarity
-        self.init_val = reading_force 
-        self.init_force = 0
-        self.force_readings = []
+        # restore main scroll on close
+        def on_destroy(event):
+            if event.widget is self:
+                try:
+                    self.main_window.restore_main_mousewheel()
+                except Exception:
+                    pass
+        self.bind("<Destroy>", on_destroy)
 
-        # Find Current Time
-        self.init_time = datetime.now()
-        self.time_readings = []
-        self.date_readings = []
-        # Starts graphing animation
-        # Storing in 'self.anim' prevents garbage collection
-        self.anim = FuncAnimation(self.fig, lambda frame: self.update_plot(frame), interval=50, blit=False)
-        
-        # On close of window behavior
-        self.protocol("WM_DELETE_WINDOW", self.on_close)
-    
-    def toggle_markers(self):
-        """
-        callback function to display sample markers during the live graph
-        """
-        if self.show_markers.get():
-            self.line.set_marker('o')
-            self.line.set_markersize(4)
-        else:
-            self.line.set_marker('')
+    # widget construction
+    def _create_widgets(self):
+        outer = tk.Frame(self, bg="#eef2f7")
+        outer.pack(fill="both", expand=True)
 
-        self.line.stale = True
-        self.canvas.draw_idle()
+        canvas = tk.Canvas(outer, bg="#eef2f7", highlightthickness=0, bd=0,
+                           yscrollincrement=8)
+        scrollbar = ttk.Scrollbar(outer, orient="vertical", command=canvas.yview)
+        canvas.configure(yscrollcommand=scrollbar.set)
+        canvas.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
 
-    def update_plot(self, frame):
-        """ 
-        This function will display the data live on the screen 
-        Y-Axis: Output of load cell in Newtons
-        X-Axis: Time Elapsed
-        """
-        
-        current_time = datetime.now()
-        date_string = f'{current_time:%Y-%m-%d %H:%M:%S}'
-        self.date_readings.append(date_string)
-        elapsed_time = (current_time - self.init_time).total_seconds()
-        self.time_readings.append(elapsed_time)
-        # Read force values on load cell
-        reading_force = self.futek.getNormalData() 
-        # 4.44822 Should be positive for shear testing due to the orientation of the load cell
-        reading_force = reading_force * (4.44822) # convert pounds to Newtons and change polarity
-        stage_force = reading_force - self.init_val
+        scroll_frame = ttk.Frame(canvas)
+        window_id = canvas.create_window((0, 0), window=scroll_frame, anchor="nw")
 
-        # Append force readings to y axis
-        #self.force_readings[current_time] = stage_force
-        self.force_readings.append(stage_force)
+        # scroll_frame height = max(natural content, canvas height) so the body card
+        # fills extra vertical space when content < canvas, and scroll kicks in otherwise.
+        def _reconfigure():
+            scroll_frame.update_idletasks()
+            canvas_h = canvas.winfo_height() or 1
+            natural_h = scroll_frame.winfo_reqheight()
+            h = max(natural_h, canvas_h)
+            current_h = int(canvas.itemcget(window_id, "height") or "0")
+            if h != current_h:
+                canvas.itemconfig(window_id, height=h)
+            canvas.configure(scrollregion=canvas.bbox("all"))
+        def schedule_reconfigure(_=None):
+            canvas.after_idle(_reconfigure)
+        scroll_frame.bind("<Configure>", schedule_reconfigure)
+        def on_canvas_configure(event):
+            canvas.itemconfig(window_id, width=event.width)
+            schedule_reconfigure()
+        canvas.bind("<Configure>", on_canvas_configure)
+        self._canvas = canvas
 
-        # Update line data
-        self.line.set_data(self.time_readings, self.force_readings)
-            
-        # Update Y-axis limit if changeds
+        container = ttk.Frame(scroll_frame, padding=(20, 14, 20, 14))
+        container.pack(fill="both", expand=True)
+
+        # title
+        ttk.Label(container, text="Shear Testing Window",
+                  style="Title.TLabel").pack(anchor="w", pady=(0, 12))
+
+        # status pill
+        self.status_pill_text = tk.StringVar(value="")
+        pill = tk.Frame(container, bg="#e7efff",
+                        highlightthickness=1,
+                        highlightbackground="#cdd9f0",
+                        highlightcolor="#cdd9f0")
+        pill.pack(fill="x", pady=(0, 12))
+        tk.Label(pill, textvariable=self.status_pill_text,
+                 bg="#e7efff", fg="#3856b3",
+                 padx=12, pady=8,
+                 font=("Helvetica", 10, "bold"),
+                 anchor="w", justify="left").pack(fill="x")
+
+        # graph card: title + matplotlib figure + display controls row underneath
+        graph_card = tk.Frame(container, bg="#ffffff",
+                              highlightthickness=1,
+                              highlightbackground="#dde2eb",
+                              highlightcolor="#dde2eb")
+        graph_card.pack(fill="both", expand=True, pady=(0, 14))
+        graph_inner = ttk.Frame(graph_card, padding=(18, 14, 18, 14),
+                                style="Card.TFrame")
+        graph_inner.pack(fill="both", expand=True)
+
+        ttk.Label(graph_inner, text="Live Force vs Time",
+                  style="SectionHeading.TLabel").pack(anchor="w", pady=(0, 8))
+
+        # small initial figsize so the controls + action rows stay visible without scrolling.
+        # tkcairo renders vector paths, so the line stays crisp when the widget expands.
+        self.fig = Figure(figsize=(5.0, 2.6), dpi=144, facecolor="#ffffff",
+                          layout="constrained")
+        self.ax = self.fig.add_subplot(111)
+        self.line, = self.ax.plot([], [], color="#3a5dd9", linewidth=1.6,
+                                  antialiased=True, solid_capstyle="round",
+                                  solid_joinstyle="round")
+        _style_axes_clean(self.ax, "Time Elapsed (seconds)", "Force (N)")
+        self._apply_graph_limits()
+        self.graph_canvas = _FigureCanvas(self.fig, master=graph_inner)
+        self.graph_canvas.get_tk_widget().pack(fill="both", expand=True)
+        self.graph_canvas.draw()
+
+        # graph display controls (story 1.7.3)
+        # column 0 has minsize so the "Last Seconds to Display" label always fits and
+        # the entry below it is never narrower than the label.
+        # columns 1-4 share equal width via uniform="ctrl" so the rest line up.
+        controls = ttk.Frame(graph_inner, style="Card.TFrame")
+        controls.pack(fill="x", pady=(12, 0))
+        controls.grid_columnconfigure(0, weight=3, minsize=240)
+        for i in range(1, 5):
+            controls.grid_columnconfigure(i, weight=1, uniform="ctrl")
+
+        # column 0: last seconds displayed
+        ttk.Label(controls, text="Last Seconds to Display",
+                  style="FieldLabel.TLabel").grid(row=0, column=0, sticky="w", padx=(0, 8))
+        ttk.Entry(controls, textvariable=self.last_seconds,
+                  style="Input.TEntry", cursor="xterm").grid(
+            row=1, column=0, sticky="ew", padx=(0, 8), pady=(4, 0))
+
+        # column 1: y axis min
+        ttk.Label(controls, text="Y-Axis Min",
+                  style="FieldLabel.TLabel").grid(row=0, column=1, sticky="w", padx=8)
+        ttk.Entry(controls, textvariable=self.y_min,
+                  style="Input.TEntry", cursor="xterm").grid(
+            row=1, column=1, sticky="ew", padx=8, pady=(4, 0))
+
+        # column 2: y axis limit
+        ttk.Label(controls, text="Y-Axis Limit",
+                  style="FieldLabel.TLabel").grid(row=0, column=2, sticky="w", padx=8)
+        ttk.Entry(controls, textvariable=self.y_max,
+                  style="Input.TEntry", cursor="xterm").grid(
+            row=1, column=2, sticky="ew", padx=8, pady=(4, 0))
+
+        # column 3: show markers checkbox (spans both rows so it centers vertically)
+        ttk.Checkbutton(controls, text="Show markers",
+                        variable=self.show_markers).grid(
+            row=0, column=3, rowspan=2, sticky="w", padx=8)
+
+        # column 4: cumulative time checkbox
+        ttk.Checkbutton(controls, text="Cumulative time",
+                        variable=self.cumulative_time).grid(
+            row=0, column=4, rowspan=2, sticky="w", padx=(8, 0))
+
+        # action row: start / stop / perform analysis (50/33/17 split via expand)
+        actions = ttk.Frame(container)
+        actions.pack(fill="x", pady=(0, 4))
+        self.start_btn = ttk.Button(actions, text="▶ Start", command=self.on_start,
+                                    style="Green.TButton")
+        self.start_btn.pack(side="left", fill="x", expand=True, padx=(0, 6))
+        self.stop_btn = ttk.Button(actions, text="⏹ Stop", command=self.on_stop,
+                                   style="Outline.TButton")
+        self.stop_btn.pack(side="left", fill="x", expand=True, padx=(6, 6))
+        self.analysis_btn = ttk.Button(actions, text="Perform analysis",
+                                       command=self.on_perform_analysis,
+                                       style="Outline.TButton")
+        self.analysis_btn.pack(side="left", fill="x", expand=True, padx=(6, 0))
+
+        # mousewheel routing while we're shown
+        self.main_window.install_mousewheel(canvas)
+
+    # state machine
+    def _set_state(self, new_state):
+        self.state = new_state
+        self._refresh_status_pill()
+        self._refresh_button_states()
+
+    def _status_pill_message(self):
+        s = self.state
+        if s == STATE_IDLE:
+            return "shear testing window opened."
+        if s == STATE_READY:
+            if self.has_data:
+                return "ready. click start to record another run, or perform analysis to use the latest run."
+            return "ready. click start to begin recording."
+        if s == STATE_RUNNING:
+            return "running. live shear graph updating."
+        if s == STATE_PAUSED_RESET:
+            return "stopped. actuator returning home, controls locked for 5s. latest data preserved."
+        if s == STATE_COMPLETED:
+            return "analysis stopped live plotting. exit enabled."
+        return ""
+
+    def _refresh_status_pill(self):
+        self.status_pill_text.set(f"{self.state}: {self._status_pill_message()}")
+
+    def _refresh_button_states(self):
+        s = self.state
+        # start enabled when ready (with or without data); disabled while running, locked, completed
+        start_on = s == STATE_READY
+        stop_on = s == STATE_RUNNING
+        # analysis enabled once data exists and the window is not in the middle of running or locked
+        analysis_on = self.has_data and s in (STATE_READY, STATE_COMPLETED)
+        self.start_btn.config(state=tk.NORMAL if start_on else tk.DISABLED)
+        self.stop_btn.config(state=tk.NORMAL if stop_on else tk.DISABLED)
+        self.analysis_btn.config(state=tk.NORMAL if analysis_on else tk.DISABLED)
+
+    # button handlers
+    def on_start(self):
+        if self.state != STATE_READY:
+            return
+        # restarting after a stop: discard previous live graph; latest_samples are already
+        # captured for analysis, so we just reset the active buffer
+        self.run_samples_x = []
+        self.run_samples_y = []
+        self.line.set_data([], [])
+        self.graph_canvas.draw_idle()
+        self._set_state(STATE_RUNNING)
+        self._sim_started_at = datetime.now().timestamp()
+        self._schedule_sample()
+
+    def on_stop(self):
+        if self.state != STATE_RUNNING:
+            return
+        if self._sim_after_id is not None:
+            self.after_cancel(self._sim_after_id)
+            self._sim_after_id = None
+        # preserve the latest run for analysis even though the graph resets visually
+        self.latest_samples_x = list(self.run_samples_x)
+        self.latest_samples_y = list(self.run_samples_y)
+        self.has_data = bool(self.latest_samples_x)
+        # graph resets (criterion: pause resets graph; latest data preserved)
+        self.run_samples_x = []
+        self.run_samples_y = []
+        self.line.set_data([], [])
+        self.graph_canvas.draw_idle()
+        self._set_state(STATE_PAUSED_RESET)
+        # 5s lockout then back to ready
+        self._pause_after_id = self.after(PAUSE_LOCKOUT_MS, self._after_pause_lockout)
+
+    def _after_pause_lockout(self):
+        self._pause_after_id = None
+        self._set_state(STATE_READY)
+
+    def on_perform_analysis(self):
+        if not self.has_data or self.state not in (STATE_READY, STATE_COMPLETED):
+            return
+        # stop any live plotting (acts as Stop, criterion)
+        if self._sim_after_id is not None:
+            self.after_cancel(self._sim_after_id)
+            self._sim_after_id = None
+        self._set_state(STATE_COMPLETED)
         try:
-            new_ylim = float(self.yaxis_max_entry.get())
-            new_ylim_min = float(self.yaxis_min_entry.get())
-            self.curr_ylim = new_ylim
-            self.curr_ylim_min = new_ylim_min
-            self.ax.set_ylim(self.curr_ylim_min, self.curr_ylim)
-        except ValueError:
-            pass  # If conversion fails, keep current ylim
-        
-        # Update X-axis limit based on checkbox and entry
-        if self.is_checked.get():
-            # Recalculate data limits and autoscale
-            self.curr_xlim += elapsed_time * 0.005
-            self.ax.set_xlim(0, self.curr_xlim)
-            #self.ax.autoscale_view(scalex=True, scaley=True)
-        else:
-            # If sliding display is unchecked, adjust x-axis limits to show only the last 15 seconds
-            sec = self.seconds_entry.get()  # Update the value of last_seconds from the entry box
-            try:
-                sec = int(sec)
-            except ValueError:
-                sec = 15  # Default to 15 seconds if invalid input
-            if elapsed_time > sec:
-                self.ax.set_xlim(elapsed_time - sec, elapsed_time)
-            else:
-                self.ax.set_xlim(0, sec)
-        
-        # For displaying live sample rate
-        if len(self.time_readings) > 100:
-            time_span = self.time_readings[-1] - self.time_readings[-100]
-            if time_span > 0:
-                sample_rate = 100 / time_span
-                self.sample_rate_text.set_text(f"Sample Rate: {sample_rate:.1f} Hz")
-
-        return self.line,
-
-    def save(self):
-        """ Save plot aswell and related tables """
-        save_path = self.main_window.saved_path.get()
-        sensor_id = self.main_window.sensor_id.get()
-        save_path = Path(save_path)
-        self.fig.savefig(f'{save_path.parent}/DataPlot.png')
-
-        date = datetime.now()
-        am_pm = date.strftime('%p')
-        filename = f"Live Graph_{date.month}-{date.day}-{date.year}_{date.hour}-{date.minute}-{date.second}-{am_pm}.xlsx"
-        workbook = xlsxwriter.Workbook(save_path / filename)
-        worksheet = workbook.add_worksheet(f"{sensor_id}")
-
-        # Create Column headers
-        worksheet.write('A1', 'Sample Number')
-        worksheet.write('B1', 'Tracking Value')
-        worksheet.write('C1', 'Date')
-        worksheet.write('D1', 'Time Elapsed')
-
-        for index in range(len(self.force_readings)):
-            worksheet.write(index+1, 0, index + 1)
-            worksheet.write(index+1, 1, self.force_readings[index])
-            worksheet.write(index+1, 2, self.date_readings[index])
-            worksheet.write(index+1, 3, self.time_readings[index])
-        
-        workbook.close()
-    
-    def on_close(self):
-        print("saving and closing")
-        self.save()
-        self.futek.stop()
-        self.futek.exit()
-        self.main_window._end_testing()
-        self.anim.event_source.stop()
+            self.main_window.perform_analysis()
+        except Exception:
+            pass
+        self.grab_release()
         self.destroy()
+
+    # simulation loop for preview mode
+    # TODO: MAKE THIS NOT SIMULATED
+    def _schedule_sample(self):
+        if self.state != STATE_RUNNING:
+            return
+        elapsed = datetime.now().timestamp() - self._sim_started_at
+        force = self._simulated_force(elapsed)
+        self.run_samples_x.append(elapsed)
+        self.run_samples_y.append(force)
+        # mirror into latest_samples so analysis source is always current
+        self.latest_samples_x = list(self.run_samples_x)
+        self.latest_samples_y = list(self.run_samples_y)
+        self.has_data = True
+        self._redraw_graph()
+        self._sim_after_id = self.after(SAMPLE_INTERVAL_MS, self._schedule_sample)
+
+    # TODO: MAKE THIS NOT SIMULATED
+    def _simulated_force(self, t):
+        # exponential approach to TARGET_FORCE_N (~1.5 N) per criterion
+        if t <= 0:
+            return 0.0
+        return TARGET_FORCE_N * (1.0 - math.exp(-t / APPROACH_TAU_S))
+
+    # graph rendering
+    def _apply_graph_limits(self):
+        try:
+            ymin = float(self.y_min.get())
+            ymax = float(self.y_max.get())
+        except (tk.TclError, ValueError):
+            ymin, ymax = 0.0, 5.0
+        if ymax <= ymin:
+            ymax = ymin + 1.0
+        self.ax.set_ylim(ymin, ymax)
+
+    def _redraw_graph(self):
+        # marker style
+        if self.show_markers.get():
+            self.line.set_marker("o")
+            self.line.set_markersize(3)
+        else:
+            self.line.set_marker("")
+
+        self.line.set_data(self.run_samples_x, self.run_samples_y)
+
+        # apply y limits live
+        try:
+            ymin = float(self.y_min.get())
+            ymax = float(self.y_max.get())
+            if ymax > ymin:
+                self.ax.set_ylim(ymin, ymax)
+        except (tk.TclError, ValueError):
+            pass
+
+        # x window: cumulative shows all, otherwise show the last N seconds
+        if self.cumulative_time.get():
+            if self.run_samples_x:
+                self.ax.set_xlim(0, max(self.run_samples_x[-1], 1.0))
+            else:
+                self.ax.set_xlim(0, 1.0)
+        else:
+            try:
+                window = max(1, int(self.last_seconds.get()))
+            except (tk.TclError, ValueError):
+                window = 30
+            if self.run_samples_x and self.run_samples_x[-1] > window:
+                self.ax.set_xlim(self.run_samples_x[-1] - window, self.run_samples_x[-1])
+            else:
+                self.ax.set_xlim(0, window)
+
+        self.graph_canvas.draw_idle()
+
+    def _on_display_setting_changed(self, *_args):
+        try:
+            self._redraw_graph()
+        except Exception:
+            pass
+
+    # close handling
+    def _on_close_attempt(self):
+        if self.state in CLOSE_BLOCKING_STATES:
+            return
+        self.grab_release()
+        self.destroy()
+
+    def _on_escape(self, _event):
+        if self.state in CLOSE_BLOCKING_STATES:
+            return "break"
+        self._on_close_attempt()
