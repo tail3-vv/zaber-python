@@ -1,8 +1,41 @@
-import sys
-import signal
+"""
+Use the pylink library to automatically read and parse
+incoming data from the jlink connection
+
+Current structure:
+0) Main Zaber script starts THIS subprocess
+1) Main function for this script takes in args from main Zaber script (save path)
+2) Opens Jlink connection
+3) Verifies that Jlink is recieving CAP data TODO: (Not done)
+4) Begins data reading
+5) Once test is finished in main script:
+    5a) End data reading
+    5b) Save data to CAP folder
+    5c) Exit subprocess
+
+Requires:
+pylink
+pylink-square
+"""
+import pylink
 import time
-import xlsxwriter
+import re
+import signal
+import sys
 from pathlib import Path
+import xlsxwriter
+from pylink.enums import JLinkInterfaces
+
+
+def try_create_entry(cap_data, acc_data, values):
+    """Create entry if both CAP and ACC data are available"""
+    if cap_data and acc_data:
+        entry = cap_data | acc_data
+        values.append(entry)
+        #print(entry)
+        return True
+    return False
+
 
 def save_data(values, savepath, run):
     """
@@ -11,10 +44,9 @@ def save_data(values, savepath, run):
     savepath :: string
     run :: int
     """
-    path = Path(savepath).parent / "CAP"
-    path.mkdir(parents=True, exist_ok=True)
+    path = Path(savepath)
     filename = f"run {run}.xlsx"
-    path = path / filename
+    path = path / filename 
     workbook = xlsxwriter.Workbook(path)
     worksheet = workbook.add_worksheet(str(run))
 
@@ -47,42 +79,142 @@ def save_data(values, savepath, run):
         worksheet.write(i + 1, 12, entry.get('ACCZ', '')) # ACCZ
     workbook.close()
 
+TIME_PATTERN = re.compile(r"TIME:\s*([-+]?\d+(?:\.\d+)?)")
+A_PATTERN = re.compile(r"A:\s*([-+]?\d+),([-+]?\d+),([-+]?\d+)")
+C_PATTERN = re.compile(r"C:\s*([-+]?\d+),([-+]?\d+),([-+]?\d+),([-+]?\d+)")
+
+
+def is_complete_entry(entry):
+    if not entry:
+        return False
+    required_keys = ["TIME", "ACCX", "ACCY", "ACCZ"] + [f"CAP{i}" for i in range(1, 9)]
+    return all(key in entry for key in required_keys)
+
+
+def append_entry(entry, values):
+    if is_complete_entry(entry):
+        values.append(entry.copy())
+        return True
+    return False
+
+
+def verify_rtt_connection(jlink, timeout=10):
+    """
+    Verify that RTT is receiving data from the device.
+    Returns True if data is received, False otherwise.
+    """
+    print(f"Verifying RTT connection (timeout: {timeout}s)...")
+    start_time = time.time()
+    
+    while time.time() - start_time < timeout:
+        data = jlink.rtt_read(0, 1024)
+        if data:
+            text = bytes(data).decode('utf-8', errors='ignore')
+            if text.strip():
+                print(f"RTT connection verified! Initial data: {text[:100]}...")
+                return True
+        time.sleep(0.5)
+    
+    print("Warning: No data received from RTT within timeout period")
+    return False
+
+
 def main(savepath, run):
+    """
+    savepath:: string
+    run:: int
+    """
     print(f"Subprocess started. Saving data to: {savepath}")
-    values = [] # this is where the data will be stored until the script is killed and it needs to be saved
+    jlink = pylink.JLink()
+    jlink.open()
+    jlink.set_tif(JLinkInterfaces.SWD)
+    jlink.connect('nRF52833_xxAA')
+
+    # Configure Real Time Transfer (RTT)
+    jlink.rtt_start()
+    
+    # Verify RTT connection before starting data collection
+    if not verify_rtt_connection(jlink, timeout=10):
+        print("Warning: Proceeding despite RTT verification failure")
+    
+    values = []
+    buffer = ""  # Accumulate data across reads
+    current_entry = {}
+
     def cleanup_and_exit(signum, frame):
+        """
+        Closes RTT link and saves values array
+        """
         print("Running pre-exit tasks")
+        append_entry(current_entry, values)
+        try:
+            jlink.rtt_stop()
+        except Exception as exc:
+            print(f"Failed to stop RTT cleanly: {exc}")
+        try:
+            jlink.close()
+        except Exception as exc:
+            print(f"Failed to close JLink cleanly: {exc}")
         save_data(values, savepath, run)
         print("Cleanup complete. Exiting")
         sys.exit(0)
 
-    # Register the handler 
+    # Register the handlers
     signal.signal(signal.SIGTERM, cleanup_and_exit)
     if hasattr(signal, 'SIGBREAK'):
         signal.signal(signal.SIGBREAK, cleanup_and_exit)
+
     try:
-        idx = 0
         while True:
-            print(idx)
-            entry = {
-                'CAP1': idx,
-                'CAP2': idx + 1,
-                'CAP3': idx + 2,
-                'CAP4': idx + 3,
-                'CAP5': idx + 4,
-                'CAP6': idx + 5,
-                'CAP7': idx + 6,
-                'CAP8': idx + 7,
-                'TIME': idx * 0.1,
-                'ACCX': idx * 0.01,
-                'ACCY': idx * 0.02,
-                'ACCZ': idx * 0.03,
-            }
-            values.append(entry)
-            idx += 1
-            time.sleep(0.1)
+            # Read from RTT terminal 0
+            data = jlink.rtt_read(0, 1024)
+
+            # Convert byte list to string
+            text = bytes(data).decode('utf-8')
+            if text:
+                buffer += text
+                lines = buffer.splitlines(keepends=True)
+                if lines and not lines[-1].endswith("\n"):
+                    process_lines = lines[:-1]
+                    buffer = lines[-1]
+                else:
+                    process_lines = lines
+                    buffer = ""
+
+                for raw_line in process_lines:
+                    line = raw_line.strip()
+                    if not line:
+                        continue
+
+                    time_match = TIME_PATTERN.search(line)
+                    if time_match:
+                        append_entry(current_entry, values)
+                        current_entry = {
+                            "TIME": float(time_match.group(1)),
+                            "C_count": 0,
+                        }
+                        continue
+
+                    a_match = A_PATTERN.search(line)
+                    if a_match and current_entry is not None:
+                        current_entry["ACCX"] = int(a_match.group(1))
+                        current_entry["ACCY"] = int(a_match.group(2))
+                        current_entry["ACCZ"] = int(a_match.group(3))
+                        continue
+
+                    c_match = C_PATTERN.search(line)
+                    if c_match and current_entry is not None:
+                        count = current_entry.get("C_count", 0)
+                        for idx, value in enumerate(c_match.groups(), start=1):
+                            channel = count * 4 + idx
+                            current_entry[f"CAP{channel}"] = int(value)
+                        current_entry["C_count"] = count + 1
+                        continue
+
+            #time.sleep(0.1)
     except KeyboardInterrupt:
         cleanup_and_exit(None, None)
+
 
 if __name__ == "__main__":
     # Check if the argument was actually passed to avoid IndexErrors
@@ -90,7 +222,7 @@ if __name__ == "__main__":
         path = sys.argv[1]
         run = int(sys.argv[2])
     else:
-        path = "default_path.txt"
-        run = 1
-
+        path = "./"
+        run = 0
+        
     main(path, run)
