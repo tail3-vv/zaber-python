@@ -141,9 +141,9 @@ def save_data(values, savepath, run):
     worksheet.write('G1', 'CAP6(pF)')
     worksheet.write('H1', 'CAP7(pF)')
     worksheet.write('I1', 'CAP8(pF)')
-    worksheet.write('K1', 'ACCX')
-    worksheet.write('L1', 'ACCY')
-    worksheet.write('M1', 'ACCZ')
+    worksheet.write('J1', 'ACCX')
+    worksheet.write('K1', 'ACCY')
+    worksheet.write('L1', 'ACCZ')
     for i, entry in enumerate(values):
         worksheet.write(i + 1, 0, entry.get('TIME', ''))  # TIME
         worksheet.write(i + 1, 1, entry.get('CAP1', ''))  # CAP1
@@ -154,9 +154,9 @@ def save_data(values, savepath, run):
         worksheet.write(i + 1, 6, entry.get('CAP6', ''))  # CAP6
         worksheet.write(i + 1, 7, entry.get('CAP7', ''))  # CAP7
         worksheet.write(i + 1, 8, entry.get('CAP8', ''))  # CAP8
-        worksheet.write(i + 1, 10, entry.get('ACCX', '')) # ACCX
-        worksheet.write(i + 1, 11, entry.get('ACCY', '')) # ACCY
-        worksheet.write(i + 1, 12, entry.get('ACCZ', '')) # ACCZ
+        worksheet.write(i + 1, 9, entry.get('ACCX', '')) # ACCX
+        worksheet.write(i + 1, 10, entry.get('ACCY', '')) # ACCY
+        worksheet.write(i + 1, 11, entry.get('ACCZ', '')) # ACCZ
     workbook.close()
 
 TIME_PATTERN = re.compile(r"TIME:\s*([-+]?\d+(?:\.\d+)?)")
