@@ -132,29 +132,28 @@ def save_data(values, savepath, run):
     workbook = xlsxwriter.Workbook(path)
     worksheet = workbook.add_worksheet(str(run))
 
-    worksheet.write('A1', 'Index')
-    worksheet.write('B1', 'CAP1')
-    worksheet.write('C1', 'CAP2')
-    worksheet.write('D1', 'CAP3')
-    worksheet.write('E1', 'CAP4')
-    worksheet.write('F1', 'CAP5')
-    worksheet.write('G1', 'CAP6')
-    worksheet.write('H1', 'CAP7')
-    worksheet.write('I1', 'CAP8')
-    worksheet.write('J1', 'TIME')
+    worksheet.write('A1', 'TIME(s)')
+    worksheet.write('B1', 'CAP1(pF)')
+    worksheet.write('C1', 'CAP2(pF)')
+    worksheet.write('D1', 'CAP3(pF)')
+    worksheet.write('E1', 'CAP4(pF)')
+    worksheet.write('F1', 'CAP5(pF)')
+    worksheet.write('G1', 'CAP6(pF)')
+    worksheet.write('H1', 'CAP7(pF)')
+    worksheet.write('I1', 'CAP8(pF)')
     worksheet.write('K1', 'ACCX')
     worksheet.write('L1', 'ACCY')
     worksheet.write('M1', 'ACCZ')
     for i, entry in enumerate(values):
-        worksheet.write(i + 1, 0, entry.get('TIME(s)', ''))  # TIME
-        worksheet.write(i + 1, 1, entry.get('CAP1(pF)', ''))  # CAP1
-        worksheet.write(i + 1, 2, entry.get('CAP2(pF)', ''))  # CAP2
-        worksheet.write(i + 1, 3, entry.get('CAP3(pF)', ''))  # CAP3
-        worksheet.write(i + 1, 4, entry.get('CAP4(pF)', ''))  # CAP4
-        worksheet.write(i + 1, 5, entry.get('CAP5(pF)', ''))  # CAP5
-        worksheet.write(i + 1, 6, entry.get('CAP6(pF)', ''))  # CAP6
-        worksheet.write(i + 1, 7, entry.get('CAP7(pF)', ''))  # CAP7
-        worksheet.write(i + 1, 8, entry.get('CAP8(pF)', ''))  # CAP8
+        worksheet.write(i + 1, 0, entry.get('TIME', ''))  # TIME
+        worksheet.write(i + 1, 1, entry.get('CAP1', ''))  # CAP1
+        worksheet.write(i + 1, 2, entry.get('CAP2', ''))  # CAP2
+        worksheet.write(i + 1, 3, entry.get('CAP3', ''))  # CAP3
+        worksheet.write(i + 1, 4, entry.get('CAP4', ''))  # CAP4
+        worksheet.write(i + 1, 5, entry.get('CAP5', ''))  # CAP5
+        worksheet.write(i + 1, 6, entry.get('CAP6', ''))  # CAP6
+        worksheet.write(i + 1, 7, entry.get('CAP7', ''))  # CAP7
+        worksheet.write(i + 1, 8, entry.get('CAP8', ''))  # CAP8
         worksheet.write(i + 1, 10, entry.get('ACCX', '')) # ACCX
         worksheet.write(i + 1, 11, entry.get('ACCY', '')) # ACCY
         worksheet.write(i + 1, 12, entry.get('ACCZ', '')) # ACCZ
