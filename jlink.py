@@ -216,7 +216,16 @@ def main(savepath, run):
     # Verify RTT connection before starting data collection
     if not verify_rtt_connection(jlink, timeout=10):
         print("Warning: Proceeding despite RTT verification failure")
-    
+
+    print("JLINK_READY", flush=True)
+    # Block here until parent sends back the shared t0 reference
+    t0_line = sys.stdin.readline()
+    try:
+        t0 = float(t0_line.strip())
+    except ValueError:
+        print(f"Failed to parse t0 from parent: {t0_line!r}, using local time")
+        t0 = time.time()
+
     values = []
     buffer = ""  # Accumulate data across reads
     current_entry = {}
@@ -269,8 +278,10 @@ def main(savepath, run):
                     time_match = TIME_PATTERN.search(line)
                     if time_match:
                         append_entry(current_entry, values)
+                        now = time.time()
                         current_entry = {
-                            "TIME": float(time_match.group(1)),
+                            "DEVICE_TIME": float(time_match.group(1)),  # raw device clock, diagnostic only
+                            "TIME": now - t0,                             # elapsed since shared start, same axis as Force column
                             "C_count": 0,
                         }
                         continue

@@ -501,6 +501,14 @@ class MainWindow:
         Extract = 12.75 # initial travel distance before starting test cycle
         isNewerUSB225 = 1 #### do we need this?
 
+        
+        #Initial params per cycle
+        init_force = 1
+        force_readings = []
+        timestamps = []
+        init_val = 0 # initial value for force
+        force_idx = 0
+
         # Zaber setup
         zaber = ZaberCLI()
         connection = zaber.connect(comport=zaber_comport)
@@ -508,19 +516,9 @@ class MainWindow:
             print("Cannot Connect to Zaber comport")
             self.error("Cannot Connect to Zaber comport")
             return 
-        # Futek Load Cell setup
-        futek = FUTEKDeviceCLI()
-
-        # Vena Vitals Sensor setup
-        savepath = self.saved_path.get()
-        cmd = [sys.executable, 'jlink.py', savepath, str(current_run)] # this is the command to run the test script. The second argument is the path where the data will be saved, and the third argument is the run number
-
-        creationflags = subprocess.CREATE_NEW_PROCESS_GROUP if os.name == 'nt' else 0
-        proc = subprocess.Popen(
-            cmd,
-            creationflags=creationflags,
-        )
-
+        
+        if zaber.axis.is_parked():
+            zaber.axis.unpark()
         # Move 12.75 before cycle
         # Keep constant:setting gap distance between base with sensor to tip to 1.5mm
         zaber.axis.move_relative((Extract-1.8), Units.LENGTH_MILLIMETRES)
@@ -530,19 +528,45 @@ class MainWindow:
         currentPosition_mm = (currentPosition*0.047625)/1000
         #print(f"Current Position is: {currentPosition_mm:.2f} mm \n")
 
+        # Futek Load Cell setup
+        futek = FUTEKDeviceCLI()
 
-        #Initial params per cycle
-        init_force = 1
-        force_readings = [0] * 12000 # 1-D array of zeros
-        init_time = datetime.now()
-        init_seconds = init_time.second + init_time.microsecond / 1e6
+        # Vena Vitals Sensor setup
+        savepath = self.saved_path.get()
+        cmd = [sys.executable, 'jlink.py', savepath, str(current_run)]
 
-        if zaber.axis.is_parked():
-            zaber.axis.unpark()
+        creationflags = subprocess.CREATE_NEW_PROCESS_GROUP if os.name == 'nt' else 0
+        proc = subprocess.Popen(
+            cmd,
+            creationflags=creationflags,
+            stdout=subprocess.PIPE,
+            stdin=subprocess.PIPE,
+            text=True,
+        )
+
+        # Wait for jlink subprocess to signal it's actually connected and ready,
+        # rather than assuming it's ready the instant it's launched
+        ready = False
+        for line in proc.stdout:
+            print("jlink subprocess:", line.strip())
+            if line.strip() == "JLINK_READY":
+                ready = True
+                break
+            if proc.poll() is not None:  # child exited before becoming ready
+                break
+
+        if not ready:
+            self.error("jlink subprocess failed to start / never became ready")
+            zaber.disconnect()
+            return current_run  # retry this run number
+
+        # Shared start reference for both sensor streams
+        t0 = datetime.now().timestamp()
+        proc.stdin.write(f"{t0}\n")
+        proc.stdin.flush()
+
         # Move actuator down
         zaber.axis.move_velocity(speed*0.1, Units.VELOCITY_MILLIMETRES_PER_SECOND)
-        init_val = 0 # initial value for force
-        force_idx = 0
         while True:
             # Check if paused during the loop
             #sleep(0.032) # sleep for 32 ms to get ~30 readings per second, also gives time for GUI to update and check for pause
@@ -572,8 +596,8 @@ class MainWindow:
             # Take the residual of the current force vs inital one
             # Store residual in force_readings and print out residual
             stage_force = reading_force - init_val
-            force_readings[force_idx] = stage_force
-            force_idx = force_idx + 1
+            force_readings.append(stage_force)
+            timestamps.append(datetime.now().timestamp() - t0)  # elapsed since shared t0
             print("Force Value: " + str(stage_force))
 
             # Once sample is hit, stop the axis
@@ -607,8 +631,8 @@ class MainWindow:
             # Take the residual of the current force vs inital one
             # Store residual in force_readings and print out residual
             stage_force = reading_force - init_val
-            force_readings[force_idx] = stage_force
-            force_idx = force_idx + 1
+            force_readings.append(stage_force)
+            timestamps.append(datetime.now().timestamp() - t0)  # elapsed since shared t0
             #print("Force Value: " + str(stage_force))
 
             # Grab current position
@@ -652,17 +676,11 @@ class MainWindow:
         worksheet.write('B1', 'Load Cell')
         worksheet.write('C1', 'Time')
 
-        # create time array
-
-        time = np.linspace(init_seconds, 
-                        (len(force_readings)- 1) * 0.016 + init_seconds,
-                        len(force_readings))
-        
         # Save data arrays to file
-        for index in range(len(force_readings)):
-            worksheet.write(index+1, 0, index + 1)
-            worksheet.write(index+1, 1, force_readings[index])
-            worksheet.write(index+1, 2, time[index])
+        for index, (stage_force, timestamp) in enumerate(zip(force_readings, timestamps), start=1):
+            worksheet.write(index, 0, index)
+            worksheet.write(index, 1, stage_force)
+            worksheet.write(index, 2, timestamp)
         workbook.close()
 
         # Pause current run, reset sensor position manually and press enter to go to next run
