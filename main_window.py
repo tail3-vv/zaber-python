@@ -496,196 +496,363 @@ class MainWindow:
     Big Testing function
     """
     def run_tests(self, n_runs, current_run, zaber_comport):
-        speed = 0.5 # speed of travel in mm/s (millimeter/second)
-        upper_limit = 20 # 32 Newtons
-        Extract = 12.75 # initial travel distance before starting test cycle
-        isNewerUSB225 = 1 #### do we need this?
+        speed = 0.5          # speed of travel in mm/s
+        upper_limit = 20     # Newtons
+        Extract = 12.75      # initial travel distance before starting test cycle
+        isNewerUSB225 = 1
 
-        
-        #Initial params per cycle
+        # Initial params per cycle
         init_force = 1
         force_readings = []
         timestamps = []
-        init_val = 0 # initial value for force
+        init_val = 0
         force_idx = 0
 
-        # Zaber setup
+        # ── Zaber setup ───────────────────────────────────────────────────────
         zaber = ZaberCLI()
         connection = zaber.connect(comport=zaber_comport)
         if connection == 0:
             print("Cannot Connect to Zaber comport")
             self.error("Cannot Connect to Zaber comport")
-            return 
-        
+            return
+
         if zaber.axis.is_parked():
             zaber.axis.unpark()
-        # Move 12.75 before cycle
-        # Keep constant:setting gap distance between base with sensor to tip to 1.5mm
-        zaber.axis.move_relative((Extract-1.8), Units.LENGTH_MILLIMETRES)
 
-        # Display current position in mm after relative move
+        # Move 12.75 mm before cycle (keeps 1.5 mm gap between base and tip)
+        zaber.axis.move_relative((Extract - 1.8), Units.LENGTH_MILLIMETRES)
+
+        # Record position after the initial move
         currentPosition = zaber.axis.get_position()
-        currentPosition_mm = (currentPosition*0.047625)/1000
-        #print(f"Current Position is: {currentPosition_mm:.2f} mm \n")
+        currentPosition_mm = (currentPosition * 0.047625) / 1000
 
-        # Futek Load Cell setup
+        # ── FUTEK setup ───────────────────────────────────────────────────────
         futek = FUTEKDeviceCLI()
 
-        # Vena Vitals Sensor setup
-        savepath = self.saved_path.get()
-        cmd = [sys.executable, 'jlink.py', savepath, str(current_run)]
-
-        creationflags = subprocess.CREATE_NEW_PROCESS_GROUP if os.name == 'nt' else 0
-        proc = subprocess.Popen(
-            cmd,
-            creationflags=creationflags,
-            stdout=subprocess.PIPE,
-            stdin=subprocess.PIPE,
-            text=True,
-        )
-
-        # Wait for jlink subprocess to signal it's actually connected and ready,
-        # rather than assuming it's ready the instant it's launched
-        ready = False
-        for line in proc.stdout:
-            print("jlink subprocess:", line.strip())
-            if line.strip() == "JLINK_READY":
-                ready = True
-                break
-            if proc.poll() is not None:  # child exited before becoming ready
-                break
-
-        if not ready:
-            self.error("jlink subprocess failed to start / never became ready")
+        # ── Launch JLink subprocess and sync shared t0 ────────────────────────
+        proc, t0 = self._launch_jlink_and_sync(current_run)
+        if proc is None:
             zaber.disconnect()
-            return current_run  # retry this run number
+            return current_run   # retry this run number
 
-        # Shared start reference for both sensor streams
-        t0 = datetime.now().timestamp()
-        proc.stdin.write(f"{t0}\n")
-        proc.stdin.flush()
-
-        # Move actuator down
-        zaber.axis.move_velocity(speed*0.1, Units.VELOCITY_MILLIMETRES_PER_SECOND)
+        # ── Phase 1: Move actuator down until upper_limit is reached ─────────
+        zaber.axis.move_velocity(speed * 0.1, Units.VELOCITY_MILLIMETRES_PER_SECOND)
         while True:
-            # Check if paused during the loop
-            #sleep(0.032) # sleep for 32 ms to get ~30 readings per second, also gives time for GUI to update and check for pause
-            if self.toggle_pause.get() == 1: # TODO: Right here, we call recalibration script
+            if self.toggle_pause.get() == 1:
                 self.warning("Warning: Pausing this run will recalibrate the zaber machine and reset the current run.")
-                
-                if self.is_warning_cancel.get() == 0: # User pressed OK
+                if self.is_warning_cancel.get() == 0:   # user pressed OK
                     zaber.axis.stop()
                     zaber.axis.wait_until_idle()
                     zaber.axis.move_absolute(17, Units.LENGTH_MILLIMETRES)
+                    self._stop_jlink_subprocess(proc)
                     futek.stop()
                     futek.exit()
                     zaber.disconnect()
-                    return current_run  # Return same run number to resume from where we left off
-                self.toggle_pause.set(0) # User pressed Cancel
-            self.root.update()  # Keep GUI responsive
+                    return current_run
+                self.toggle_pause.set(0)                 # user pressed Cancel
 
-            reading_force = futek.getNormalData() # Read force value
+            self.root.update()
 
+            reading_force = futek.getNormalData()
             if isNewerUSB225:
-                reading_force = reading_force * (-4.44822) # convert pounds to Newtons and change polarity
+                reading_force = reading_force * (-4.44822)  # lbf -> N, polarity flip
 
-            if init_force: # Verify initial values
-                init_val = reading_force # TODO: There should be an easier way than this flag
+            if init_force:
+                init_val = reading_force
                 init_force = 0
-            
-            # Take the residual of the current force vs inital one
-            # Store residual in force_readings and print out residual
+
             stage_force = reading_force - init_val
             force_readings.append(stage_force)
-            timestamps.append(datetime.now().timestamp() - t0)  # elapsed since shared t0
+            timestamps.append(datetime.now().timestamp() - t0)
             print("Force Value: " + str(stage_force))
 
-            # Once sample is hit, stop the axis
             if stage_force >= upper_limit:
                 zaber.axis.stop()
                 break
-        
-        # Move actuator back up
-        zaber.axis.move_velocity(-speed*2, Units.VELOCITY_MILLIMETRES_PER_SECOND)
+
+        # ── Phase 2: Move actuator back up to starting position ──────────────
+        zaber.axis.move_velocity(-speed * 2, Units.VELOCITY_MILLIMETRES_PER_SECOND)
         while True:
-            # Check if paused during the loop
-            if self.toggle_pause.get() == 1: # TODO: Right here, we call recalibration script
+            if self.toggle_pause.get() == 1:
                 self.warning("Warning: Pausing this run will recalibrate the zaber machine and reset the current run.")
-                
-                if self.is_warning_cancel.get() == 0:
+                if self.is_warning_cancel.get() == 0:   # user pressed OK
                     zaber.axis.stop()
                     zaber.axis.wait_until_idle()
                     zaber.axis.move_absolute(17, Units.LENGTH_MILLIMETRES)
+                    self._stop_jlink_subprocess(proc)
                     futek.stop()
                     futek.exit()
                     zaber.disconnect()
-                    return current_run  # Return same run number to resume from where we left off
-                self.toggle_pause.set(0)
-            self.root.update()  # Keep GUI responsive
+                    return current_run
+                self.toggle_pause.set(0)                 # user pressed Cancel
+
+            self.root.update()
 
             reading_force = futek.getNormalData()
-
             if isNewerUSB225:
-                reading_force = reading_force * (-4.44822) # convert pounds to Newtons and change polarity
+                reading_force = reading_force * (-4.44822)
 
-            # Take the residual of the current force vs inital one
-            # Store residual in force_readings and print out residual
             stage_force = reading_force - init_val
             force_readings.append(stage_force)
-            timestamps.append(datetime.now().timestamp() - t0)  # elapsed since shared t0
-            #print("Force Value: " + str(stage_force))
+            timestamps.append(datetime.now().timestamp() - t0)
 
-            # Grab current position
             curr_pos = zaber.axis.get_position()
-            last_position = (curr_pos*0.047625)/1000
-            #print("Position: " + str(last_position))
-            if last_position <= (currentPosition*0.047625)/1000:
+            last_position = (curr_pos * 0.047625) / 1000
+            if last_position <= (currentPosition * 0.047625) / 1000:
                 zaber.axis.stop()
                 break
-            
-        # move back to original position
+
+        # ── Return to home position ───────────────────────────────────────────
         if zaber.axis.is_parked():
             zaber.axis.unpark()
         zaber.axis.move_absolute(17, Units.LENGTH_MILLIMETRES)
-        #print("Run " + str(run_idx) + " completed")
 
-        # Save data to cap file and kill subprocess
-        if os.name == 'nt':
-            proc.send_signal(signal.CTRL_BREAK_EVENT)
-        else:
-            proc.terminate() # ends subprocess
+        # ── Stop JLink subprocess ─────────────────────────────────────────────
+        self._stop_jlink_subprocess(proc)
 
-        # now wait for subprocess to cleanup
-        try:
-            proc.wait(timeout=10)
-            print("Subprocess exited cleanly")
-        except subprocess.TimeoutExpired:
-            print("Subprocess took to long. Killing script")
-            proc.kill()
-
-        # Save data to run file
-        # We could make this a separate function
+        # ── Save data to Excel ────────────────────────────────────────────────
         path = Path(self.saved_path.get())
-        file_name = "Run " + str(current_run) + ".xlsx" # create file name
+        file_name = "Run " + str(current_run) + ".xlsx"
         path = path / file_name
         workbook = xlsxwriter.Workbook(path)
         worksheet = workbook.add_worksheet(str(current_run))
 
-        # Create Column headers
         worksheet.write('A1', 'Index')
         worksheet.write('B1', 'Load Cell')
         worksheet.write('C1', 'Time')
 
-        # Save data arrays to file
         for index, (stage_force, timestamp) in enumerate(zip(force_readings, timestamps), start=1):
             worksheet.write(index, 0, index)
             worksheet.write(index, 1, stage_force)
             worksheet.write(index, 2, timestamp)
         workbook.close()
 
-        # Pause current run, reset sensor position manually and press enter to go to next run
-        # if(current_run != n_runs):
-            #zaber.axis.move_relative((Extract-1.8), Units.LENGTH_MILLIMETRES)
+        futek.stop()
+        futek.exit()
+        zaber.disconnect()
+        return int(current_run) + 1
+    
+
+    def _launch_jlink_and_sync(self, current_run):
+        """Launches jlink.py, waits for JLINK_READY, sends back shared t0.
+        Returns (proc, t0) on success, (None, None) on failure."""
+        savepath = self.saved_path.get()
+        cmd = [sys.executable, 'jlink.py', savepath, str(current_run)]
+        creationflags = subprocess.CREATE_NEW_PROCESS_GROUP if os.name == 'nt' else 0
+        proc = subprocess.Popen(
+            cmd, creationflags=creationflags,
+            stdout=subprocess.PIPE, stdin=subprocess.PIPE, text=True,
+        )
+
+        ready = False
+        for line in proc.stdout:
+            print("jlink subprocess:", line.strip())
+            if line.strip() == "JLINK_READY":
+                ready = True
+                break
+            if proc.poll() is not None:
+                break
+
+        if not ready:
+            self.error("jlink subprocess failed to start / never became ready")
+            return None, None
+
+        t0 = datetime.now().timestamp()
+        try:
+            proc.stdin.write(f"{t0}\n")
+            proc.stdin.flush()
+        except (BrokenPipeError, OSError):
+            self.error("Failed to send t0 to jlink subprocess (pipe closed)")
+            return None, None
+
+        return proc, t0
+
+
+    def _stop_jlink_subprocess(self, proc):
+        if os.name == 'nt':
+            proc.send_signal(signal.CTRL_BREAK_EVENT)
+        else:
+            proc.terminate()
+        try:
+            proc.wait(timeout=10)
+            print("Subprocess exited cleanly")
+        except subprocess.TimeoutExpired:
+            print("Subprocess took too long. Killing script")
+            proc.kill()
+
+    def run_sine_test(
+        self,
+        current_run,
+        zaber_comport,
+        freq_hz=5.0,
+        duration_s=5.0,
+        min_force_n=4.0,       # lower force bound AND approach threshold
+        max_force_n=20.0,      # upper force bound
+        approach_speed_mm_s=0.5,
+        kp=0.05,               # proportional gain: mm/s of velocity per N of error — tune this
+        hard_limit_n=None,     # emergency stop; defaults to max_force_n * 1.3 if not provided
+    ):
+        """
+        Two-phase force-controlled sine test:
+
+        Phase 1 — Approach:
+            The actuator descends at approach_speed_mm_s until the load cell
+            reads >= min_force_n, establishing physical contact before any
+            oscillation begins.
+
+        Phase 2 — Force-controlled sine:
+            A proportional controller tracks a sinusoidal force target that
+            oscillates between min_force_n and max_force_n at freq_hz.
+            Positive force error  -> move down (increase force).
+            Negative force error  -> move up   (decrease force).
+            If actual force ever exceeds hard_limit_n the axis stops immediately.
+        """
+        if hard_limit_n is None:
+            hard_limit_n = max_force_n * 1.3
+
+        zaber = ZaberCLI()
+        connection = zaber.connect(comport=zaber_comport)
+        if connection == 0:
+            print("Cannot Connect to Zaber comport")
+            self.error("Cannot Connect to Zaber comport")
+            return current_run
+
+        futek = FUTEKDeviceCLI()
+
+        proc, t0 = self._launch_jlink_and_sync(current_run)
+        if proc is None:
+            zaber.disconnect()
+            return current_run
+
+        if zaber.axis.is_parked():
+            zaber.axis.unpark()
+
+        # ── Phase 1: Approach ────────────────────────────────────────────────
+        print(f"Phase 1: Descending until force >= {min_force_n:.1f} N ...")
+        zaber.axis.move_velocity(approach_speed_mm_s, Units.VELOCITY_MILLIMETRES_PER_SECOND)
+
+        approach_overloaded = False
+        while True:
+            self.root.update()
+            force = futek.getNormalData() * (-4.44822)
+
+            if force >= hard_limit_n:
+                approach_overloaded = True
+                zaber.axis.stop()
+                zaber.axis.wait_until_idle()
+                self.error(
+                    f"OVERLOAD during approach: {force:.2f} N exceeded hard limit "
+                    f"of {hard_limit_n:.2f} N. Aborting."
+                )
+                break
+
+            if force >= min_force_n:
+                zaber.axis.stop()
+                zaber.axis.wait_until_idle()
+                print(f"Contact established — load cell reads {force:.2f} N.")
+                break
+
+        if approach_overloaded:
+            self._stop_jlink_subprocess(proc)
+            futek.stop()
+            futek.exit()
+            zaber.disconnect()
+            return current_run   # do not advance run counter
+
+        # ── Phase 2: Force-controlled sine ───────────────────────────────────
+        mean_force      = (min_force_n + max_force_n) / 2.0
+        force_amplitude = (max_force_n - min_force_n) / 2.0
+
+        print(
+            f"Phase 2: Running force-controlled sine — "
+            f"{min_force_n:.1f} N to {max_force_n:.1f} N "
+            f"@ {freq_hz:.1f} Hz for {duration_s:.1f} s"
+        )
+
+        force_readings  = []
+        target_readings = []
+        timestamps      = []
+        overload_triggered = False
+
+        t_start = datetime.now().timestamp()
+
+        while True:
+            now       = datetime.now().timestamp()
+            t_elapsed = now - t_start
+
+            if t_elapsed >= duration_s:
+                break
+
+            # ── pause handling ─────────────────────────────────────────────
+            if self.toggle_pause.get() == 1:
+                self.warning("Pausing mid-cycle isn't supported; stopping this run.")
+                self.toggle_pause.set(0)
+                break
+
+            self.root.update()
+
+            actual_force = futek.getNormalData() * (-4.44822)
+
+            # ── hard overload guard ────────────────────────────────────────
+            if actual_force >= hard_limit_n:
+                overload_triggered = True
+                self.error(
+                    f"OVERLOAD: {actual_force:.2f} N exceeded hard limit of "
+                    f"{hard_limit_n:.2f} N. Stopping immediately."
+                )
+                break
+
+            # ── proportional force controller ──────────────────────────────
+            target_force = mean_force + force_amplitude * math.sin(
+                2 * math.pi * freq_hz * t_elapsed
+            )
+            error    = target_force - actual_force  # +ve -> need more force -> move down
+            velocity = kp * error                   # mm/s; sign drives direction automatically
+
+            zaber.axis.move_velocity(velocity, Units.VELOCITY_MILLIMETRES_PER_SECOND)
+
+            # ── log ────────────────────────────────────────────────────────
+            force_readings.append(actual_force)
+            target_readings.append(target_force)
+            timestamps.append(now - t0)
+
+        # Unconditional stop
+        zaber.axis.stop()
+        zaber.axis.wait_until_idle()
+
+        self._stop_jlink_subprocess(proc)
+
+        if overload_triggered:
+            self.warning(
+                f"Run {current_run} aborted due to overload. No data file written."
+            )
+            futek.stop()
+            futek.exit()
+            zaber.disconnect()
+            return current_run   # do not advance run counter
+
+        # ── Save results ──────────────────────────────────────────────────────
+        path      = Path(self.saved_path.get())
+        file_name = f"Run {current_run} sine.xlsx"
+        path      = path / file_name
+        workbook  = xlsxwriter.Workbook(path)
+        worksheet = workbook.add_worksheet(str(current_run))
+
+        worksheet.write('A1', 'Index')
+        worksheet.write('B1', 'Load Cell — Actual (N)')
+        worksheet.write('C1', 'Time (s)')
+        worksheet.write('D1', f'Target Force (N)  [{freq_hz} Hz, {min_force_n:.1f}–{max_force_n:.1f} N]')
+
+        for index, (force, target, t) in enumerate(
+            zip(force_readings, target_readings, timestamps), start=1
+        ):
+            worksheet.write(index, 0, index)
+            worksheet.write(index, 1, force)
+            worksheet.write(index, 2, t)
+            worksheet.write(index, 3, target)
+
+        workbook.close()
+
         futek.stop()
         futek.exit()
         zaber.disconnect()
