@@ -9,6 +9,7 @@ import subprocess
 import sys
 import signal
 import os
+import time
 import xlsxwriter
 import math
 from time import sleep
@@ -144,7 +145,7 @@ class MainWindow:
         #                         self.sensor_id.get(), self.zaber_comport.get())
         # state = self.run_tests(n_runs, current_run, self.zaber_comport.get())
         state = self.run_sine_test(current_run, self.zaber_comport.get())
-        
+
         # Check if run was paused or completed
         is_paused = current_run == state
         self.update_textbox(f"Run {current_run} was paused" if is_paused 
