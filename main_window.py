@@ -687,14 +687,13 @@ class MainWindow:
                     lower_force_n=4.0, upper_force_n=8.0, cycle_count=25,
                     sample_rate_hz=100.0):
         """
-        Calibration pass (borrowed from fatigue._run_cyclical): press in slowly and
-        record the actuator depth at lower_force_n and upper_force_n. That depth
-        range is converted into a depth<->force mapping. The sine target force is
-        then converted to a target position each tick and driven via move_absolute
-        (non-blocking), paced at sample_rate_hz - same tracking approach as the
-        fatigue test, just driving a pure sine instead of a cyclical fatigue shape.
-        Force is logged alongside the true-sine reference, with a hard force
-        ceiling that aborts the run if exceeded. Uses the shared jlink handshake.
+        Calibration pass: press in slowly and record the actuator depth at
+        lower_force_n and upper_force_n. That depth range is converted into a
+        depth<->force mapping. The sine target force is converted to a target
+        position each tick and driven via move_absolute (non-blocking), paced at
+        sample_rate_hz. Force and the actual target-force-per-tick are logged
+        together, with a hard force ceiling that aborts the run if exceeded.
+        Uses the shared jlink handshake.
         """
         Extract = 12.75
         calib_speed = 0.2  # mm/s, slow and deliberate
@@ -779,6 +778,10 @@ class MainWindow:
                                 Units.LENGTH_MILLIMETRES)
         zaber.axis.wait_until_idle()
 
+        # how long setup + calibration took, on the shared t0 clock — saved as a
+        # convenience column so "Time since test start" can be recovered later
+        test_start_offset = datetime.now().timestamp() - t0
+
         # --- paced move_absolute tracking loop, driving a pure sine target ---
         FORCE_CEILING_N = upper_force_n + 5.0  # set from load cell rating / sensor tolerance
         spike_threshold = (upper_force_n - lower_force_n) + 5.0
@@ -786,6 +789,7 @@ class MainWindow:
 
         force_readings = []
         timestamps = []
+        reference_readings = []   # target force actually used to drive motion each tick
         prev_force = None
         tripped = False
         loop_start = time.time()
@@ -811,6 +815,7 @@ class MainWindow:
                 print(f"move_absolute failed mid-run: {exc}")
 
             reading_force = futek.getNormalData() * (-4.44822) - cal_init
+            print(f"[sine debug] t={t_elapsed:.3f}s target={f_t:.2f}N actual={reading_force:.2f}N")
 
             # Safety: hard ceiling, or a jump too large for one sample step to be legitimate
             if reading_force > FORCE_CEILING_N or (
@@ -824,6 +829,7 @@ class MainWindow:
 
             force_readings.append(reading_force)
             timestamps.append(datetime.now().timestamp() - t0)
+            reference_readings.append(f_t)
 
             time.sleep(sample_dt)
 
@@ -837,8 +843,6 @@ class MainWindow:
             futek.stop(); futek.exit(); zaber.disconnect()
             return current_run  # discard run, don't save/increment on a safety abort
 
-        reference = [target_force(t) for t in timestamps]
-
         path = Path(self.saved_path.get())
         file_name = f"Run {current_run} sine.xlsx"
         path = path / file_name
@@ -846,13 +850,15 @@ class MainWindow:
         worksheet = workbook.add_worksheet(str(current_run))
         worksheet.write('A1', 'Index')
         worksheet.write('B1', 'Load Cell - Actual (N)')
-        worksheet.write('C1', 'Time (s)')
-        worksheet.write('D1', f'Target Force (N) [{freq_hz}Hz, {lower_force_n}-{upper_force_n}N]')
-        for index, (force, t, ref) in enumerate(zip(force_readings, timestamps, reference), start=1):
+        worksheet.write('C1', 'Time (s)')                       # shared t0 clock — aligns with CAP file
+        worksheet.write('D1', 'Time since test start (s)')      # 0-based at tracking start
+        worksheet.write('E1', f'Target Force (N) [{freq_hz}Hz, {lower_force_n}-{upper_force_n}N]')
+        for index, (force, t, ref) in enumerate(zip(force_readings, timestamps, reference_readings), start=1):
             worksheet.write(index, 0, index)
             worksheet.write(index, 1, force)
             worksheet.write(index, 2, t)
-            worksheet.write(index, 3, ref)
+            worksheet.write(index, 3, t - test_start_offset)
+            worksheet.write(index, 4, ref)
         workbook.close()
 
         futek.stop()
