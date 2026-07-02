@@ -11,7 +11,7 @@ from scipy.ndimage import uniform_filter1d
 import pickle
 from scipy.signal import savgol_filter
 class EMAnalysis():
-    def __init__(self, path, sensor_id, sensor_type):
+    def __init__(self, path, sensor_id, sensor_type, smoother='MA_100'):
         """
         Initialize EB Analysis with parameters
         
@@ -19,8 +19,10 @@ class EMAnalysis():
             path: Path to data directory
             sensor_id: Sensor ID number
             sensor_type: Standard or Inverted
+            smoother: Smoothing method for the data
         """
         # Store parameters
+        self.smoother = smoother        # <── add this one line near the top
         self.sensor_id = sensor_id
         self.path = Path(path).parent # this is because Path(path) is in fut folder
         self.sensor_type = sensor_type
@@ -87,6 +89,69 @@ class EMAnalysis():
         self._derive_and_plot()
         self._plot_all_chs_across_runs()
         self._plot_all_runs_across_chs()
+
+
+    def _smooth(self, y: np.ndarray) -> np.ndarray:
+        """
+        Dispatch to the smoother selected at construction time.
+        Mirrors the four techniques benchmarked in PSCurveBenchmark so that
+        whatever best_smoother() returns can be passed directly to __init__.
+        """
+        if self.smoother == 'MA_100':
+            return pd.Series(y).rolling(100, min_periods=1).mean().to_numpy()
+
+        elif self.smoother == 'MA_200':
+            return pd.Series(y).rolling(200, min_periods=1).mean().to_numpy()
+
+        elif self.smoother == 'SavGol':
+            return savgol_filter(y, window_length=101, polyorder=2)
+
+        elif self.smoother == 'CubicSpline':
+            idx = np.arange(len(y))
+            noise_std = np.std(np.diff(y))
+            s = len(y) * (noise_std ** 2) * 5
+            try:
+                spl = UnivariateSpline(idx, y, s=s, k=3)
+                return spl(idx)
+            except Exception as e:
+                print(f'CubicSpline failed ({e}), falling back to MA_100.')
+                return pd.Series(y).rolling(100, min_periods=1).mean().to_numpy()
+
+        else:
+            raise ValueError(
+                f"Unknown smoother: {self.smoother!r}. "
+                f"Choose from {['MA_100', 'MA_200', 'SavGol', 'CubicSpline']}"
+            )
+    
+
+    @classmethod
+    def run_smoother_benchmark(
+        cls,
+        output_path: str,
+        n_curves: int = 10,
+        n_reps: int = 3,
+        noise_fraction: float = 0.15,
+        weight_phase: float = 1.0,
+        weight_attenuation: float = 1.0,
+        weight_repro: float = 1.0,
+    ) -> str:
+        """
+        Run PSCurveBenchmark and return the best smoother name.
+        Pass the returned string as the `smoother` argument to EMAnalysis.__init__.
+
+        Example
+        -------
+        best = EMAnalysis.run_smoother_benchmark('/path/to/output')
+        analysis = EMAnalysis(data_path, sensor_id, sensor_type, smoother=best)
+        """
+        from smoothing_benchmark import PSCurveBenchmark
+        bench = PSCurveBenchmark(
+            path=output_path,
+            n_curves=n_curves,
+            n_reps=n_reps,
+            noise_fraction=noise_fraction,
+        )
+        return bench.best_smoother(weight_phase, weight_attenuation, weight_repro)
 
     def _create_data(self, csv_files, xlsx_files):
         """Load CAP and FUT data from files"""
@@ -311,8 +376,11 @@ class EMAnalysis():
                 # # y_smooth = uniform_filter1d(y[st_pt:], size=150, mode='nearest')
                 # # x_smooth = savgol_filter(x[st_pt:], window_length=101, polyorder=2)
                 # # y_smooth = savgol_filter(y[st_pt:], window_length=101, polyorder=2)
-                x_smooth = pd.Series(x[st_pt:]).rolling(100, min_periods=1).mean().to_numpy()
-                y_smooth = pd.Series(y[st_pt:]).rolling(100, min_periods=1).mean().to_numpy()
+                # x_smooth = pd.Series(x[st_pt:]).rolling(100, min_periods=1).mean().to_numpy()
+                # y_smooth = pd.Series(y[st_pt:]).rolling(100, min_periods=1).mean().to_numpy()
+
+                x_smooth = self._smooth(x[st_pt:])
+                y_smooth = self._smooth(y[st_pt:])
                 """
                 # Use a dynamic variable window size approach 
                 noise_level = np.std(np.diff(y))

@@ -687,7 +687,7 @@ class MainWindow:
         freq_hz=5.0,
         duration_s=5.0,
         min_force_n=4.0,       # lower force bound AND approach threshold
-        max_force_n=20.0,      # upper force bound
+        max_force_n=8.0,      # upper force bound
         approach_speed_mm_s=0.5,
         kp=0.05,               # proportional gain: mm/s of velocity per N of error — tune this
         hard_limit_n=None,     # emergency stop; defaults to max_force_n * 1.3 if not provided
