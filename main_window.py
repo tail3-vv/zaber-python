@@ -10,6 +10,7 @@ import sys
 import signal
 import os
 import xlsxwriter
+import math
 from time import sleep
 from pathlib import Path
 from datetime import datetime
@@ -680,42 +681,27 @@ class MainWindow:
             print("Subprocess took too long. Killing script")
             proc.kill()
 
-    def run_sine_test(
-        self,
-        current_run,
-        zaber_comport,
-        freq_hz=5.0,
-        duration_s=5.0,
-        min_force_n=4.0,       # lower force bound AND approach threshold
-        max_force_n=8.0,      # upper force bound
-        approach_speed_mm_s=0.5,
-        kp=0.05,               # proportional gain: mm/s of velocity per N of error — tune this
-        hard_limit_n=None,     # emergency stop; defaults to max_force_n * 1.3 if not provided
-    ):
+    def run_sine_test(self, current_run, zaber_comport, freq_hz=5.0,
+                    lower_force_n=4.0, upper_force_n=8.0, cycle_count=25):
         """
-        Two-phase force-controlled sine test:
-
-        Phase 1 — Approach:
-            The actuator descends at approach_speed_mm_s until the load cell
-            reads >= min_force_n, establishing physical contact before any
-            oscillation begins.
-
-        Phase 2 — Force-controlled sine:
-            A proportional controller tracks a sinusoidal force target that
-            oscillates between min_force_n and max_force_n at freq_hz.
-            Positive force error  -> move down (increase force).
-            Negative force error  -> move up   (decrease force).
-            If actual force ever exceeds hard_limit_n the axis stops immediately.
+        Calibration pass (borrowed from fatigue._run_cyclical): press in slowly and
+        record the actuator depth at lower_force_n and upper_force_n. That depth
+        range is converted into a center position + amplitude, which is handed to
+        the native move_sin command so the firmware generates the oscillation
+        (no Python-loop feedback in the motion path). Force is logged alongside
+        a true-sine reference curve derived from the same calibration, with a
+        hard force ceiling that aborts the run if exceeded. Uses the shared
+        jlink sync handshake.
         """
-        if hard_limit_n is None:
-            hard_limit_n = max_force_n * 1.3
+        Extract = 12.75
+        calib_speed = 0.2  # mm/s, slow and deliberate
 
         zaber = ZaberCLI()
         connection = zaber.connect(comport=zaber_comport)
         if connection == 0:
             print("Cannot Connect to Zaber comport")
             self.error("Cannot Connect to Zaber comport")
-            return current_run
+            return
 
         futek = FUTEKDeviceCLI()
 
@@ -724,133 +710,137 @@ class MainWindow:
             zaber.disconnect()
             return current_run
 
+        # approach the sensor, same as the threshold test
+        zaber.axis.move_relative((Extract - 1.8), Units.LENGTH_MILLIMETRES)
+        start_pos_mm = zaber.axis.get_position(Units.LENGTH_MILLIMETRES)
+
         if zaber.axis.is_parked():
             zaber.axis.unpark()
 
-        # ── Phase 1: Approach ────────────────────────────────────────────────
-        print(f"Phase 1: Descending until force >= {min_force_n:.1f} N ...")
-        zaber.axis.move_velocity(approach_speed_mm_s, Units.VELOCITY_MILLIMETRES_PER_SECOND)
+        # --- calibration press: find depth at lower_force_n and upper_force_n ---
+        zaber.axis.move_velocity(calib_speed, Units.VELOCITY_MILLIMETRES_PER_SECOND)
 
-        approach_overloaded = False
-        while True:
-            self.root.update()
-            force = futek.getNormalData() * (-4.44822)
-
-            if force >= hard_limit_n:
-                approach_overloaded = True
-                zaber.axis.stop()
-                zaber.axis.wait_until_idle()
-                self.error(
-                    f"OVERLOAD during approach: {force:.2f} N exceeded hard limit "
-                    f"of {hard_limit_n:.2f} N. Aborting."
-                )
-                break
-
-            if force >= min_force_n:
-                zaber.axis.stop()
-                zaber.axis.wait_until_idle()
-                print(f"Contact established — load cell reads {force:.2f} N.")
-                break
-
-        if approach_overloaded:
-            self._stop_jlink_subprocess(proc)
-            futek.stop()
-            futek.exit()
-            zaber.disconnect()
-            return current_run   # do not advance run counter
-
-        # ── Phase 2: Force-controlled sine ───────────────────────────────────
-        mean_force      = (min_force_n + max_force_n) / 2.0
-        force_amplitude = (max_force_n - min_force_n) / 2.0
-
-        print(
-            f"Phase 2: Running force-controlled sine — "
-            f"{min_force_n:.1f} N to {max_force_n:.1f} N "
-            f"@ {freq_hz:.1f} Hz for {duration_s:.1f} s"
-        )
-
-        force_readings  = []
-        target_readings = []
-        timestamps      = []
-        overload_triggered = False
-
-        t_start = datetime.now().timestamp()
+        init_force = None
+        prev_stage = None
+        shallow_depth = None
+        deep_depth = None
+        cal_spike_threshold = (upper_force_n - lower_force_n) + 5.0
 
         while True:
-            now       = datetime.now().timestamp()
-            t_elapsed = now - t_start
-
-            if t_elapsed >= duration_s:
-                break
-
-            # ── pause handling ─────────────────────────────────────────────
-            if self.toggle_pause.get() == 1:
-                self.warning("Pausing mid-cycle isn't supported; stopping this run.")
-                self.toggle_pause.set(0)
-                break
-
             self.root.update()
+            f = futek.getNormalData() * (-4.44822)
+            if init_force is None:
+                init_force = f
+            stage = abs(f - init_force)
 
-            actual_force = futek.getNormalData() * (-4.44822)
+            if prev_stage is not None and abs(stage - prev_stage) > cal_spike_threshold:
+                zaber.axis.stop()
+                self.error("Force spike during calibration - aborting sine test")
+                self._stop_jlink_subprocess(proc)
+                futek.stop(); futek.exit(); zaber.disconnect()
+                return current_run
+            prev_stage = stage
 
-            # ── hard overload guard ────────────────────────────────────────
-            if actual_force >= hard_limit_n:
-                overload_triggered = True
-                self.error(
-                    f"OVERLOAD: {actual_force:.2f} N exceeded hard limit of "
-                    f"{hard_limit_n:.2f} N. Stopping immediately."
-                )
+            depth = zaber.axis.get_position(Units.LENGTH_MILLIMETRES) - start_pos_mm
+            if shallow_depth is None and stage >= lower_force_n:
+                shallow_depth = depth
+            if stage >= upper_force_n:
+                deep_depth = depth
                 break
 
-            # ── proportional force controller ──────────────────────────────
-            target_force = mean_force + force_amplitude * math.sin(
-                2 * math.pi * freq_hz * t_elapsed
-            )
-            error    = target_force - actual_force  # +ve -> need more force -> move down
-            velocity = kp * error                   # mm/s; sign drives direction automatically
-
-            zaber.axis.move_velocity(velocity, Units.VELOCITY_MILLIMETRES_PER_SECOND)
-
-            # ── log ────────────────────────────────────────────────────────
-            force_readings.append(actual_force)
-            target_readings.append(target_force)
-            timestamps.append(now - t0)
-
-        # Unconditional stop
         zaber.axis.stop()
         zaber.axis.wait_until_idle()
 
+        if shallow_depth is None or deep_depth is None:
+            self.error("Calibration failed to reach both force bounds")
+            self._stop_jlink_subprocess(proc)
+            futek.stop(); futek.exit(); zaber.disconnect()
+            return current_run
+
+        cal_init = init_force
+
+        # --- calibration -> center position + amplitude, move to center first ---
+        center_depth = (shallow_depth + deep_depth) / 2.0
+        amplitude_mm = (deep_depth - shallow_depth) / 2.0
+        zaber.axis.move_absolute(start_pos_mm + center_depth, Units.LENGTH_MILLIMETRES)
+
+        # --- firmware-generated sine: no Python loop in the motion path ---
+        period_ms = 1000.0 / freq_hz
+        count = round(cycle_count * 2) / 2.0  # move_sin count must be a multiple of 0.5
+
+        # Safety ceiling: set based on your load cell's rated range / sensor tolerance,
+        # not just an arbitrary margin above the intended target.
+        FORCE_CEILING_N = upper_force_n + 5.0
+        spike_threshold = (upper_force_n - lower_force_n) + 5.0
+
+        force_readings = []
+        timestamps = []
+        prev_force = None
+
+        zaber.axis.move_sin(
+            amplitude_mm, Units.LENGTH_MILLIMETRES,
+            period_ms, Units.TIME_MILLISECONDS,
+            count=count,
+            wait_until_idle=False,
+        )
+
+        tripped = False
+        while zaber.axis.is_busy():
+            if self.toggle_pause.get() == 1:
+                self.warning("Pausing mid-cycle isn't supported; stopping this run.")
+                zaber.axis.move_sin_stop()
+                zaber.axis.wait_until_idle()
+                self.toggle_pause.set(0)
+                break
+            self.root.update()
+
+            reading_force = futek.getNormalData() * (-4.44822) - cal_init
+
+            # Safety: hard ceiling, or a jump too large for one sample step to be legitimate
+            if reading_force > FORCE_CEILING_N or (
+                prev_force is not None and abs(reading_force - prev_force) > spike_threshold
+            ):
+                zaber.axis.move_sin_stop()
+                zaber.axis.wait_until_idle()
+                self.error(f"Force exceeded safety ceiling ({reading_force:.2f} N) - sine test stopped")
+                tripped = True
+                break
+            prev_force = reading_force
+
+            force_readings.append(reading_force)
+            timestamps.append(datetime.now().timestamp() - t0)
+
+        if not tripped:
+            zaber.axis.move_sin_stop()
+            zaber.axis.wait_until_idle()
+        zaber.axis.move_absolute(17, Units.LENGTH_MILLIMETRES)
+
         self._stop_jlink_subprocess(proc)
 
-        if overload_triggered:
-            self.warning(
-                f"Run {current_run} aborted due to overload. No data file written."
-            )
-            futek.stop()
-            futek.exit()
-            zaber.disconnect()
-            return current_run   # do not advance run counter
+        if tripped:
+            futek.stop(); futek.exit(); zaber.disconnect()
+            return current_run  # discard run, don't save/increment on a safety abort
 
-        # ── Save results ──────────────────────────────────────────────────────
-        path      = Path(self.saved_path.get())
+        # --- true-sine reference, in force units, from the same calibration ---
+        center_force = (lower_force_n + upper_force_n) / 2.0
+        amplitude_force = (upper_force_n - lower_force_n) / 2.0
+        reference = [center_force + amplitude_force * math.sin(2 * math.pi * freq_hz * t)
+                    for t in timestamps]
+
+        path = Path(self.saved_path.get())
         file_name = f"Run {current_run} sine.xlsx"
-        path      = path / file_name
-        workbook  = xlsxwriter.Workbook(path)
+        path = path / file_name
+        workbook = xlsxwriter.Workbook(path)
         worksheet = workbook.add_worksheet(str(current_run))
-
         worksheet.write('A1', 'Index')
-        worksheet.write('B1', 'Load Cell — Actual (N)')
+        worksheet.write('B1', 'Load Cell - Actual (N)')
         worksheet.write('C1', 'Time (s)')
-        worksheet.write('D1', f'Target Force (N)  [{freq_hz} Hz, {min_force_n:.1f}–{max_force_n:.1f} N]')
-
-        for index, (force, target, t) in enumerate(
-            zip(force_readings, target_readings, timestamps), start=1
-        ):
+        worksheet.write('D1', f'Target Force (N) [{freq_hz}Hz, {lower_force_n}-{upper_force_n}N]')
+        for index, (force, t, ref) in enumerate(zip(force_readings, timestamps, reference), start=1):
             worksheet.write(index, 0, index)
             worksheet.write(index, 1, force)
             worksheet.write(index, 2, t)
-            worksheet.write(index, 3, target)
-
+            worksheet.write(index, 3, ref)
         workbook.close()
 
         futek.stop()
