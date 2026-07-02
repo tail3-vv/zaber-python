@@ -140,9 +140,10 @@ class MainWindow:
         
         # Run Test function and update textbox according to progress
         self.update_textbox(f"Beginning run {current_run}")
-        state = self.test_funct(n_runs, current_run, self.saved_path.get(), 
-                                self.sensor_id.get(), self.zaber_comport.get())
+        # state = self.test_funct(n_runs, current_run, self.saved_path.get(), 
+        #                         self.sensor_id.get(), self.zaber_comport.get())
         # state = self.run_tests(n_runs, current_run, self.zaber_comport.get())
+        state = self.run_sine_test(current_run, self.zaber_comport.get())
         
         # Check if run was paused or completed
         is_paused = current_run == state
@@ -682,19 +683,21 @@ class MainWindow:
             proc.kill()
 
     def run_sine_test(self, current_run, zaber_comport, freq_hz=5.0,
-                    lower_force_n=4.0, upper_force_n=8.0, cycle_count=25):
+                    lower_force_n=4.0, upper_force_n=8.0, cycle_count=25,
+                    sample_rate_hz=100.0):
         """
         Calibration pass (borrowed from fatigue._run_cyclical): press in slowly and
         record the actuator depth at lower_force_n and upper_force_n. That depth
-        range is converted into a center position + amplitude, which is handed to
-        the native move_sin command so the firmware generates the oscillation
-        (no Python-loop feedback in the motion path). Force is logged alongside
-        a true-sine reference curve derived from the same calibration, with a
-        hard force ceiling that aborts the run if exceeded. Uses the shared
-        jlink sync handshake.
+        range is converted into a depth<->force mapping. The sine target force is
+        then converted to a target position each tick and driven via move_absolute
+        (non-blocking), paced at sample_rate_hz - same tracking approach as the
+        fatigue test, just driving a pure sine instead of a cyclical fatigue shape.
+        Force is logged alongside the true-sine reference, with a hard force
+        ceiling that aborts the run if exceeded. Uses the shared jlink handshake.
         """
         Extract = 12.75
         calib_speed = 0.2  # mm/s, slow and deliberate
+        sample_dt = 1.0 / sample_rate_hz
 
         zaber = ZaberCLI()
         connection = zaber.connect(comport=zaber_comport)
@@ -759,40 +762,52 @@ class MainWindow:
 
         cal_init = init_force
 
-        # --- calibration -> center position + amplitude, move to center first ---
-        center_depth = (shallow_depth + deep_depth) / 2.0
-        amplitude_mm = (deep_depth - shallow_depth) / 2.0
-        zaber.axis.move_absolute(start_pos_mm + center_depth, Units.LENGTH_MILLIMETRES)
+        # --- move to the sine's starting position before tracking begins ---
+        def target_depth_for_force(f_target):
+            span = (upper_force_n - lower_force_n) or 1.0
+            frac = max(0.0, min(1.0, (f_target - lower_force_n) / span))
+            return shallow_depth + frac * (deep_depth - shallow_depth)
 
-        # --- firmware-generated sine: no Python loop in the motion path ---
-        period_ms = 1000.0 / freq_hz
-        count = round(cycle_count * 2) / 2.0  # move_sin count must be a multiple of 0.5
+        center_force = (lower_force_n + upper_force_n) / 2.0
+        amplitude_force = (upper_force_n - lower_force_n) / 2.0
 
-        # Safety ceiling: set based on your load cell's rated range / sensor tolerance,
-        # not just an arbitrary margin above the intended target.
-        FORCE_CEILING_N = upper_force_n + 5.0
+        def target_force(t):
+            return center_force + amplitude_force * math.sin(2 * math.pi * freq_hz * t)
+
+        zaber.axis.move_absolute(start_pos_mm + target_depth_for_force(target_force(0.0)),
+                                Units.LENGTH_MILLIMETRES)
+        zaber.axis.wait_until_idle()
+
+        # --- paced move_absolute tracking loop, driving a pure sine target ---
+        FORCE_CEILING_N = upper_force_n + 5.0  # set from load cell rating / sensor tolerance
         spike_threshold = (upper_force_n - lower_force_n) + 5.0
+        total_time = cycle_count / freq_hz
 
         force_readings = []
         timestamps = []
         prev_force = None
-
-        zaber.axis.move_sin(
-            amplitude_mm, Units.LENGTH_MILLIMETRES,
-            period_ms, Units.TIME_MILLISECONDS,
-            count=count,
-            wait_until_idle=False,
-        )
-
         tripped = False
-        while zaber.axis.is_busy():
+        loop_start = time.time()
+
+        while True:
             if self.toggle_pause.get() == 1:
                 self.warning("Pausing mid-cycle isn't supported; stopping this run.")
-                zaber.axis.move_sin_stop()
-                zaber.axis.wait_until_idle()
+                zaber.axis.stop()
                 self.toggle_pause.set(0)
                 break
             self.root.update()
+
+            t_elapsed = time.time() - loop_start
+            if t_elapsed >= total_time:
+                break
+
+            f_t = target_force(t_elapsed)
+            target_depth = target_depth_for_force(f_t)
+            try:
+                zaber.axis.move_absolute(start_pos_mm + target_depth, Units.LENGTH_MILLIMETRES,
+                                        wait_until_idle=False)
+            except Exception as exc:
+                print(f"move_absolute failed mid-run: {exc}")
 
             reading_force = futek.getNormalData() * (-4.44822) - cal_init
 
@@ -800,8 +815,7 @@ class MainWindow:
             if reading_force > FORCE_CEILING_N or (
                 prev_force is not None and abs(reading_force - prev_force) > spike_threshold
             ):
-                zaber.axis.move_sin_stop()
-                zaber.axis.wait_until_idle()
+                zaber.axis.stop()
                 self.error(f"Force exceeded safety ceiling ({reading_force:.2f} N) - sine test stopped")
                 tripped = True
                 break
@@ -810,9 +824,10 @@ class MainWindow:
             force_readings.append(reading_force)
             timestamps.append(datetime.now().timestamp() - t0)
 
-        if not tripped:
-            zaber.axis.move_sin_stop()
-            zaber.axis.wait_until_idle()
+            time.sleep(sample_dt)
+
+        zaber.axis.stop()
+        zaber.axis.wait_until_idle()
         zaber.axis.move_absolute(17, Units.LENGTH_MILLIMETRES)
 
         self._stop_jlink_subprocess(proc)
@@ -821,11 +836,7 @@ class MainWindow:
             futek.stop(); futek.exit(); zaber.disconnect()
             return current_run  # discard run, don't save/increment on a safety abort
 
-        # --- true-sine reference, in force units, from the same calibration ---
-        center_force = (lower_force_n + upper_force_n) / 2.0
-        amplitude_force = (upper_force_n - lower_force_n) / 2.0
-        reference = [center_force + amplitude_force * math.sin(2 * math.pi * freq_hz * t)
-                    for t in timestamps]
+        reference = [target_force(t) for t in timestamps]
 
         path = Path(self.saved_path.get())
         file_name = f"Run {current_run} sine.xlsx"
