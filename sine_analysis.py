@@ -7,12 +7,12 @@ CAP/ACC (jlink) run xlsx files, then for every file in each folder:
 
   - Plots and saves Force vs Time (actual + target/reference if present)
     or CAP vs Time (8 subplots, one per channel)
-  - Runs an FFT on each relevant column, checks the peak frequency against
+  - Extracts per-cycle peak-to-peak PERIOD (via scipy.find_peaks) for each
+    relevant column, compares the mean achieved frequency (1/period) against
     an expected frequency you provide, and records the result
-  - Plots and saves an FFT power-spectrum graph (power vs frequency) for
-    each analyzed column, with the expected frequency marked
 
-All FFT results (one row per file/column) are written to fft_summary.csv.
+All frequency-match results (one row per file/column) are written to
+frequency_summary.csv.
 
 Additionally, for run-to-run CONSISTENCY checking:
   - Extracts per-cycle peak-to-peak AMPLITUDE and per-cycle PERIOD from each
@@ -68,106 +68,6 @@ def resample_uniform(t: np.ndarray, y: np.ndarray, fs: float = None):
     return t_uniform, y_uniform, fs
 
 
-def fft_analyze(t: np.ndarray, y: np.ndarray, fs: float = None, exclude_below_hz: float = 0.02):
-    """Resamples to a uniform grid, detrends, and runs an FFT.
-    Returns (freqs, magnitude, peak_freq, peak_mag)."""
-    t_u, y_u, fs = resample_uniform(t, y, fs=fs)
-    # Linear detrend (not just mean subtraction) removes both the DC offset
-    # and any slow linear drift/ramp (e.g. thermal drift, settling after the
-    # calibration press). A ramp's energy concentrates right at DC and the
-    # first few bins - mean-subtraction alone leaves that in place and it
-    # shows up as a spurious 0 Hz spike.
-    y_detrend = scipy_detrend(y_u, type="linear")
-
-    n = len(y_detrend)
-    window = np.hanning(n)
-    spectrum = np.fft.rfft(y_detrend * window)
-    freqs = np.fft.rfftfreq(n, d=1.0 / fs)
-    magnitude = np.abs(spectrum)
-
-    mask = freqs > exclude_below_hz
-    if not np.any(mask):
-        return freqs, magnitude, 0.0, 0.0
-
-    peak_idx = np.argmax(magnitude[mask])
-    peak_freq = freqs[mask][peak_idx]
-    peak_mag = magnitude[mask][peak_idx]
-    return freqs, magnitude, peak_freq, peak_mag
-
-
-def plot_fft_spectrum(file_stem: str, label: str, freqs: np.ndarray, magnitude: np.ndarray,
-                       expected_freq_hz: float, out_dir: Path, max_freq_hz: float = None,
-                       exclude_below_hz: float = 0.02):
-    """Plots power (magnitude^2) vs frequency for a single column's FFT and
-    saves it as a PNG. Marks the expected frequency with a low-opacity
-    vertical dashed line so it doesn't obscure the trace underneath.
-    X-axis is limited to a sensible range around the fundamental so the
-    peak is visible instead of being squashed by the full Nyquist range.
-    Near-DC bins (<= exclude_below_hz) are dropped from the plot, matching
-    the same exclusion used in the dominance calculation, so any residual
-    drift/ramp energy at 0 Hz doesn't visually swamp the real peak.
-    """
-    if max_freq_hz is None:
-        # Show a handful of harmonics beyond the expected frequency, or the
-        # full range if the signal is high-frequency relative to fs/2.
-        max_freq_hz = min(freqs[-1], max(expected_freq_hz * 10, 2.0))
-
-    mask = (freqs <= max_freq_hz) & (freqs > exclude_below_hz)
-
-    fig, ax = plt.subplots(figsize=(9, 4.5))
-    ax.plot(freqs[mask], magnitude[mask], linewidth=1.0, color="C0")
-    ax.axvline(expected_freq_hz, color="red", linestyle="--", linewidth=1.0,
-               alpha=0.35, label=f"expected {expected_freq_hz} Hz")
-    ax.set_xlabel("Frequency (Hz)")
-    ax.set_ylabel("Magnitude")
-    ax.set_title(f"FFT Magnitude Spectrum — {file_stem} — {label}")
-    ax.legend()
-    fig.tight_layout()
-
-    safe_label = "".join(c if c.isalnum() else "_" for c in label)[:60]
-    out_path = out_dir / f"{file_stem}_{safe_label}_fft.png"
-    fig.savefig(out_path, dpi=150)
-    plt.close(fig)
-    print(f"  Saved: {out_path}")
-    return out_path
-
-
-def build_result_row(file_name: str, label: str, freqs, magnitude, peak_freq, peak_mag,
-                      expected_freq_hz: float, tol_fraction: float = 0.10, tol_floor_hz: float = 0.02):
-    """Builds one CSV row dict for a single file/column's FFT result.
-    tol scales with the expected frequency (10% by default) instead of a
-    fixed Hz value."""
-    total_power = np.sum(magnitude[freqs > 0.02]) or 1.0
-    peak_fraction = peak_mag / total_power
-    tol_hz = max(tol_floor_hz, tol_fraction * expected_freq_hz)
-    hit = abs(peak_freq - expected_freq_hz) <= tol_hz
-    freq_resolution = freqs[1] - freqs[0] if len(freqs) > 1 else float("nan")
-
-    # Diagnostic: what fraction of total magnitude lies within the plotted
-    # window (same range used in plot_fft_spectrum) vs the full spectrum
-    # out to Nyquist. If this is much less than 100%, dominance_pct is
-    # being pulled down by magnitude outside the visible plot range (e.g. a
-    # broadband noise floor at higher frequencies), not by anything you
-    # can see in the graph. This now matches the plot and dominance_pct,
-    # both of which use linear magnitude rather than power.
-    window_max_hz = min(freqs[-1], max(expected_freq_hz * 10, 2.0))
-    window_magnitude = np.sum(magnitude[(freqs > 0.02) & (freqs <= window_max_hz)])
-    power_in_window_pct = round(100.0 * window_magnitude / total_power, 2)
-
-    return {
-        "file": file_name,
-        "column": label,
-        "expected_freq_hz": expected_freq_hz,
-        "peak_freq_hz": round(peak_freq, 5),
-        "tolerance_hz": round(tol_hz, 5),
-        "freq_resolution_hz": round(freq_resolution, 5),
-        "dominance_pct": round(peak_fraction * 100, 2),
-        "power_in_window_pct": power_in_window_pct,
-        "window_max_hz": round(window_max_hz, 3),
-        "match": hit,
-    }
-
-
 def extract_cycle_metrics(t: np.ndarray, y: np.ndarray, expected_freq_hz: float, fs: float = None):
     """Resamples/detrends, then finds each cycle's peak and trough to get
     one PERIOD value (time between consecutive peaks) and one AMPLITUDE
@@ -198,6 +98,42 @@ def extract_cycle_metrics(t: np.ndarray, y: np.ndarray, expected_freq_hz: float,
     amplitudes = np.array(amplitudes)
 
     return periods, amplitudes
+
+
+def build_frequency_row(file_name: str, label: str, periods: np.ndarray, expected_freq_hz: float,
+                         tol_fraction: float = 0.10, tol_floor_hz: float = 0.02):
+    """Builds one CSV row dict comparing achieved frequency (from peak-to-peak
+    periods) against the expected/target frequency. tol scales with the
+    expected frequency (10% by default) instead of a fixed Hz value."""
+    tol_hz = max(tol_floor_hz, tol_fraction * expected_freq_hz)
+
+    if len(periods) == 0:
+        return {
+            "file": file_name, "column": label,
+            "expected_freq_hz": expected_freq_hz,
+            "n_cycles": 0,
+            "achieved_freq_hz_mean": None,
+            "achieved_freq_hz_std": None,
+            "tolerance_hz": round(tol_hz, 5),
+            "match": None,
+            "note": "no peaks found - not enough cycles or signal too noisy",
+        }
+
+    achieved_freqs = 1.0 / periods
+    mean_freq = float(achieved_freqs.mean())
+    std_freq = float(achieved_freqs.std())
+    hit = abs(mean_freq - expected_freq_hz) <= tol_hz
+
+    return {
+        "file": file_name, "column": label,
+        "expected_freq_hz": expected_freq_hz,
+        "n_cycles": len(periods),
+        "achieved_freq_hz_mean": round(mean_freq, 5),
+        "achieved_freq_hz_std": round(std_freq, 5),
+        "tolerance_hz": round(tol_hz, 5),
+        "match": hit,
+        "note": "",
+    }
 
 
 def sampling_summary(file_name: str, t: np.ndarray, expected_freq_hz: float):
@@ -262,24 +198,22 @@ def plot_force(force_path: Path, out_dir: Path, expected_freq_hz: float, cycle_r
     plt.close(fig)
     print(f"  Saved: {out_path}")
 
-    fft_rows = []
+    freq_rows = []
     t = df[plot_time_col].to_numpy(dtype=float)
     sampling_rows.append(sampling_summary(force_path.name, t, expected_freq_hz))
 
     columns_to_check = [actual_col] + ([target_col] if target_col is not None else [])
     for col in columns_to_check:
         y = df[col].to_numpy(dtype=float)
-        freqs, mag, pf, pm = fft_analyze(t, y)
-        fft_rows.append(build_result_row(force_path.name, col, freqs, mag, pf, pm, expected_freq_hz))
-        plot_fft_spectrum(force_path.stem, col, freqs, mag, expected_freq_hz, out_dir)
-
         periods, amplitudes = extract_cycle_metrics(t, y, expected_freq_hz)
+        freq_rows.append(build_frequency_row(force_path.name, col, periods, expected_freq_hz))
+
         for p in periods:
             cycle_records["period"][col].append({"run": force_path.name, "value": p})
         for a in amplitudes:
             cycle_records["amplitude"][col].append({"run": force_path.name, "value": a})
 
-    return fft_rows
+    return freq_rows
 
 
 def plot_caps(cap_path: Path, out_dir: Path, expected_freq_hz: float, cycle_records: dict, sampling_rows: list):
@@ -319,46 +253,21 @@ def plot_caps(cap_path: Path, out_dir: Path, expected_freq_hz: float, cycle_reco
     plt.close(fig)
     print(f"  Saved: {out_path}")
 
-    fft_rows = []
+    freq_rows = []
     t = df[time_col].to_numpy(dtype=float)
     sampling_rows.append(sampling_summary(cap_path.name, t, expected_freq_hz))
 
-    # Combined FFT power-spectrum grid (4x2, one subplot per CAP channel) so
-    # you can compare all 8 channels' spectra at a glance, in addition to
-    # the individual per-channel PNGs.
-    fig2, axes2 = plt.subplots(4, 2, figsize=(12, 12), sharex=True)
-    axes2 = axes2.flatten()
-
-    for i, col in enumerate(cap_cols):
+    for col in cap_cols:
         y = df[col].to_numpy(dtype=float)
-        freqs, mag, pf, pm = fft_analyze(t, y)
-        fft_rows.append(build_result_row(cap_path.name, col, freqs, mag, pf, pm, expected_freq_hz))
-        plot_fft_spectrum(cap_path.stem, col, freqs, mag, expected_freq_hz, out_dir)
-
-        max_freq_hz = min(freqs[-1], max(expected_freq_hz * 10, 2.0))
-        mask = (freqs <= max_freq_hz) & (freqs > 0.02)
-        ax2 = axes2[i]
-        ax2.plot(freqs[mask], mag[mask], linewidth=0.8, color=f"C{i}")
-        ax2.axvline(expected_freq_hz, color="red", linestyle="--", linewidth=0.8, alpha=0.35)
-        ax2.set_title(col, fontsize=10)
-        ax2.set_ylabel("Magnitude", fontsize=8)
-        if i >= 6:
-            ax2.set_xlabel("Frequency (Hz)")
-
         periods, amplitudes = extract_cycle_metrics(t, y, expected_freq_hz)
+        freq_rows.append(build_frequency_row(cap_path.name, col, periods, expected_freq_hz))
+
         for p in periods:
             cycle_records["period"][col].append({"run": cap_path.name, "value": p})
         for a in amplitudes:
             cycle_records["amplitude"][col].append({"run": cap_path.name, "value": a})
 
-    fig2.suptitle(f"FFT Magnitude Spectrum — CAP channels — {cap_path.name}")
-    fig2.tight_layout(rect=[0, 0, 1, 0.97])
-    combined_fft_path = out_dir / f"{cap_path.stem}_cap_fft_grid.png"
-    fig2.savefig(combined_fft_path, dpi=150)
-    plt.close(fig2)
-    print(f"  Saved: {combined_fft_path}")
-
-    return fft_rows
+    return freq_rows
 
 
 def run_welch_anova(cycle_records: dict, metric: str):
@@ -434,7 +343,7 @@ def prompt_folder(prompt_text):
 
 
 def main():
-    print("Sine test analysis (folder mode, FFT + run-to-run ANOVA) — press Enter to skip a folder.\n")
+    print("Sine test analysis (folder mode, peak-to-peak frequency + run-to-run ANOVA) — press Enter to skip a folder.\n")
 
     force_folder = prompt_folder("Folder of Force/Load-cell xlsx files: ")
     cap_folder = prompt_folder("Folder of CAP/jlink xlsx files: ")
@@ -445,7 +354,7 @@ def main():
     out_dir = Path("./sine_analysis_output_0.25hz")
     out_dir.mkdir(exist_ok=True)
 
-    fft_rows = []
+    freq_rows = []
     sampling_rows = []
     # cycle_records["period"|"amplitude"][signal_name] = list of {"run":..., "value":...}
     cycle_records = {"period": defaultdict(list), "amplitude": defaultdict(list)}
@@ -456,7 +365,7 @@ def main():
             print(f"  No xlsx files found in {force_folder}")
         for f in force_files:
             print(f"Processing {f.name}...")
-            fft_rows.extend(plot_force(f, out_dir, expected_freq_hz, cycle_records, sampling_rows))
+            freq_rows.extend(plot_force(f, out_dir, expected_freq_hz, cycle_records, sampling_rows))
 
     if cap_folder is not None:
         cap_files = list_xlsx_files(cap_folder)
@@ -464,19 +373,19 @@ def main():
             print(f"  No xlsx files found in {cap_folder}")
         for f in cap_files:
             print(f"Processing {f.name}...")
-            fft_rows.extend(plot_caps(f, out_dir, expected_freq_hz, cycle_records, sampling_rows))
+            freq_rows.extend(plot_caps(f, out_dir, expected_freq_hz, cycle_records, sampling_rows))
 
     if sampling_rows:
         sampling_path = out_dir / "sampling_summary.csv"
         pd.DataFrame(sampling_rows).to_csv(sampling_path, index=False)
         print(f"Sampling rate summary saved to: {sampling_path.resolve()}")
 
-    if fft_rows:
-        fft_summary_path = out_dir / "fft_summary.csv"
-        pd.DataFrame(fft_rows).to_csv(fft_summary_path, index=False)
-        print(f"\nFFT summary saved to: {fft_summary_path.resolve()}")
+    if freq_rows:
+        freq_summary_path = out_dir / "frequency_summary.csv"
+        pd.DataFrame(freq_rows).to_csv(freq_summary_path, index=False)
+        print(f"\nFrequency summary saved to: {freq_summary_path.resolve()}")
     else:
-        print("\nNo FFT results to save.")
+        print("\nNo frequency results to save.")
 
     anova_rows = run_welch_anova(cycle_records, "amplitude") + run_welch_anova(cycle_records, "period")
 
