@@ -683,21 +683,22 @@ class MainWindow:
             print("Subprocess took too long. Killing script")
             proc.kill()
 
-    def run_sine_test(self, current_run, zaber_comport, freq_hz=0.1,
-                    lower_force_n=4.0, upper_force_n=8.0, cycle_count=25,
-                    sample_rate_hz=100.0):
+    def run_sine_test(self, current_run, zaber_comport, velocity_mm_s=0.7,
+                        lower_force_n=2.275, upper_force_n=3.575, cycle_count=25,
+                        sample_rate_hz=100.0):
         """
-        Calibration pass: press in slowly and record the actuator depth at
-        lower_force_n and upper_force_n. That depth range is converted into a
-        depth<->force mapping. The sine target force is converted to a target
-        position each tick and driven via move_absolute (non-blocking), paced
-        on an absolute-time schedule (no time.sleep) at sample_rate_hz. Force
-        and the actual target-force-per-tick are logged together, with a hard
-        force ceiling that aborts the run if exceeded. Uses the shared jlink
-        handshake.
+        Constant-velocity bang-bang force tracking: drives the Zaber stage at a
+        fixed velocity_mm_s, reversing direction each time the FUTEK reading
+        crosses lower_force_n or upper_force_n. No depth calibration or
+        force->depth mapping is needed since direction is driven directly off
+        live force feedback. Produces a triangle-wave depth trajectory (not a
+        sine) - useful for isolating whether undershoot is a control-mode
+        artifact vs. a genuine actuator bandwidth limit. Sampled on an
+        absolute-time schedule (no time.sleep) at sample_rate_hz. Logs both
+        commanded force thresholds and actual position readback. Uses the
+        shared jlink handshake.
         """
         Extract = 12.75
-        calib_speed = 0.2  # mm/s, slow and deliberate
         sample_dt = 1.0 / sample_rate_hz
 
         zaber = ZaberCLI()
@@ -721,80 +722,50 @@ class MainWindow:
         if zaber.axis.is_parked():
             zaber.axis.unpark()
 
-        # --- calibration press: find depth at lower_force_n and upper_force_n ---
-        zaber.axis.move_velocity(calib_speed, Units.VELOCITY_MILLIMETRES_PER_SECOND)
+        # establish a force zero-reference the same way the sine test does
+        init_force = futek.getNormalData() * (-4.44822)
+        cal_init = init_force
 
-        init_force = None
-        prev_stage = None
-        shallow_depth = None
-        deep_depth = None
-        cal_spike_threshold = (upper_force_n - lower_force_n) + 5.0
+        # --- drive in, find the lower threshold once to set the starting direction ---
+        zaber.axis.move_velocity(velocity_mm_s, Units.VELOCITY_MILLIMETRES_PER_SECOND)
+        spike_threshold = (upper_force_n - lower_force_n) + 5.0
+        prev_force = None
 
         while True:
             self.root.update()
-            f = futek.getNormalData() * (-4.44822)
-            if init_force is None:
-                init_force = f
-            stage = abs(f - init_force)
-
-            if prev_stage is not None and abs(stage - prev_stage) > cal_spike_threshold:
+            f = futek.getNormalData() * (-4.44822) - cal_init
+            if prev_force is not None and abs(f - prev_force) > spike_threshold:
                 zaber.axis.stop()
-                self.error("Force spike during calibration - aborting sine test")
+                self.error("Force spike while approaching lower threshold - aborting test")
                 self._stop_jlink_subprocess(proc)
                 futek.stop(); futek.exit(); zaber.disconnect()
                 return current_run
-            prev_stage = stage
-
-            depth = zaber.axis.get_position(Units.LENGTH_MILLIMETRES) - start_pos_mm
-            if shallow_depth is None and stage >= lower_force_n:
-                shallow_depth = depth
-            if stage >= upper_force_n:
-                deep_depth = depth
+            prev_force = f
+            if f >= lower_force_n:
                 break
 
         zaber.axis.stop()
         zaber.axis.wait_until_idle()
 
-        if shallow_depth is None or deep_depth is None:
-            self.error("Calibration failed to reach both force bounds")
-            self._stop_jlink_subprocess(proc)
-            futek.stop(); futek.exit(); zaber.disconnect()
-            return current_run
-
-        cal_init = init_force
-
-        # --- single depth mapping, used for both loading and unloading ---
-        def target_depth_for_force(f_target):
-            span = (upper_force_n - lower_force_n) or 1.0
-            frac = max(0.0, min(1.0, (f_target - lower_force_n) / span))
-            return shallow_depth + frac * (deep_depth - shallow_depth)
-
-        center_force = (lower_force_n + upper_force_n) / 2.0
-        amplitude_force = (upper_force_n - lower_force_n) / 2.0
-
-        def target_force(t):
-            return center_force + amplitude_force * math.sin(2 * math.pi * freq_hz * t)
-
-        # --- move to the sine's starting position before tracking begins ---
-        zaber.axis.move_absolute(start_pos_mm + target_depth_for_force(target_force(0.0)),
-                                Units.LENGTH_MILLIMETRES)
-        zaber.axis.wait_until_idle()
-
-        # how long setup + calibration took, on the shared t0 clock — saved as a
-        # convenience column so "Time since test start" can be recovered later
+        # how long setup took, on the shared t0 clock
         test_start_offset = datetime.now().timestamp() - t0
 
-        # --- absolute-time-scheduled tracking loop, driving a pure sine target ---
-        FORCE_CEILING_N = upper_force_n + 5.0  # set from load cell rating / sensor tolerance
-        spike_threshold = (upper_force_n - lower_force_n) + 5.0
-        total_time = cycle_count / freq_hz
+        # --- bang-bang tracking loop ---
+        FORCE_CEILING_N = upper_force_n + 5.0
+        total_reversals_needed = cycle_count * 2  # one full cycle = one up leg + one down leg
 
         force_readings = []
         timestamps = []
-        reference_readings = []   # target force actually used to drive motion each tick
+        position_readings = []      # actual Zaber position readback each tick
+        direction_flags = []        # True = driving toward upper_force_n, False = toward lower
         missed_ticks = 0
         prev_force = None
         tripped = False
+        reversal_count = 0
+        loading = True  # we just arrived at lower threshold, now driving up
+
+        zaber.axis.move_velocity(velocity_mm_s, Units.VELOCITY_MILLIMETRES_PER_SECOND)
+
         loop_start = time.time()
         next_tick = loop_start
         sample_idx = 0
@@ -809,44 +780,50 @@ class MainWindow:
 
             now = time.time()
             if now < next_tick:
-                continue  # spin until the next scheduled sample, stay GUI-responsive
+                continue  # spin until next scheduled sample, stay GUI-responsive
 
-            t_elapsed = now - loop_start
-            if t_elapsed >= total_time:
+            if reversal_count >= total_reversals_needed:
                 break
 
             if now - next_tick > sample_dt:
-                missed_ticks += 1  # fell behind by at least one full sample period
+                missed_ticks += 1
 
-            f_t = target_force(t_elapsed)
-            target_depth = target_depth_for_force(f_t)
-            try:
-                zaber.axis.move_absolute(start_pos_mm + target_depth, Units.LENGTH_MILLIMETRES,
-                                        wait_until_idle=False)
-            except Exception as exc:
-                print(f"move_absolute failed mid-run: {exc}")
-
+            t_elapsed = now - loop_start
             reading_force = futek.getNormalData() * (-4.44822) - cal_init
+            actual_pos = zaber.axis.get_position(Units.LENGTH_MILLIMETRES) - start_pos_mm
 
             if sample_idx % 10 == 0:
-                print(f"[sine debug] t={t_elapsed:.3f}s target={f_t:.2f}N actual={reading_force:.2f}N")
+                print(f"[triangle debug] t={t_elapsed:.3f}s force={reading_force:.2f}N "
+                    f"pos={actual_pos:.4f}mm {'up' if loading else 'down'} "
+                    f"rev={reversal_count}/{total_reversals_needed}")
 
-            # Safety: hard ceiling, or a jump too large for one sample step to be legitimate
+            # Safety: hard ceiling, or an implausible jump between samples
             if reading_force > FORCE_CEILING_N or (
                 prev_force is not None and abs(reading_force - prev_force) > spike_threshold
             ):
                 zaber.axis.stop()
-                self.error(f"Force exceeded safety ceiling ({reading_force:.2f} N) - sine test stopped")
+                self.error(f"Force exceeded safety ceiling ({reading_force:.2f} N) - triangle test stopped")
                 tripped = True
                 break
             prev_force = reading_force
 
+            # reversal logic: driven directly by live force feedback
+            if loading and reading_force >= upper_force_n:
+                zaber.axis.move_velocity(-velocity_mm_s, Units.VELOCITY_MILLIMETRES_PER_SECOND)
+                loading = False
+                reversal_count += 1
+            elif (not loading) and reading_force <= lower_force_n:
+                zaber.axis.move_velocity(velocity_mm_s, Units.VELOCITY_MILLIMETRES_PER_SECOND)
+                loading = True
+                reversal_count += 1
+
             force_readings.append(reading_force)
             timestamps.append(datetime.now().timestamp() - t0)
-            reference_readings.append(f_t)
+            position_readings.append(actual_pos)
+            direction_flags.append(loading)
 
             sample_idx += 1
-            next_tick += sample_dt  # schedule from the grid, not from "now" — avoids drift buildup
+            next_tick += sample_dt
 
         zaber.axis.stop()
         zaber.axis.wait_until_idle()
@@ -859,11 +836,19 @@ class MainWindow:
             return current_run  # discard run, don't save/increment on a safety abort
 
         if missed_ticks:
-            print(f"[sine debug] {missed_ticks} sample tick(s) missed their schedule "
+            print(f"[triangle debug] {missed_ticks} sample tick(s) missed their schedule "
                 f"(> {sample_dt*1000:.1f}ms late)")
 
+        # achieved frequency is an outcome now, not an input - log it for the write-up
+        if reversal_count > 0 and timestamps:
+            total_duration = timestamps[-1] - timestamps[0]
+            achieved_freq_hz = reversal_count / 2.0 / total_duration if total_duration > 0 else float('nan')
+            print(f"[triangle debug] achieved ~{achieved_freq_hz:.3f} Hz over {reversal_count} reversals")
+        else:
+            achieved_freq_hz = float('nan')
+
         path = Path(self.saved_path.get())
-        file_name = f"Run {current_run} sine.xlsx"
+        file_name = f"Run {current_run} triangle.xlsx"
         path = path / file_name
         workbook = xlsxwriter.Workbook(path)
         worksheet = workbook.add_worksheet(str(current_run))
@@ -871,13 +856,20 @@ class MainWindow:
         worksheet.write('B1', 'Load Cell - Actual (N)')
         worksheet.write('C1', 'Time (s)')                       # shared t0 clock — aligns with CAP file
         worksheet.write('D1', 'Time since test start (s)')      # 0-based at tracking start
-        worksheet.write('E1', f'Target Force (N) [{freq_hz}Hz, {lower_force_n}-{upper_force_n}N]')
-        for index, (force, t, ref) in enumerate(zip(force_readings, timestamps, reference_readings), start=1):
+        worksheet.write('E1', 'Actual Position (mm)')            # real Zaber readback, not commanded
+        worksheet.write('F1', 'Direction (True=loading/up)')
+        worksheet.write('G1', f'Velocity Setpoint (mm/s) [+/-{velocity_mm_s}, {lower_force_n}-{upper_force_n}N]')
+        worksheet.write('H1', f'Achieved freq (Hz, avg): {achieved_freq_hz:.4f}')
+        for index, (force, t, pos, direction) in enumerate(
+            zip(force_readings, timestamps, position_readings, direction_flags), start=1
+        ):
             worksheet.write(index, 0, index)
             worksheet.write(index, 1, force)
             worksheet.write(index, 2, t)
             worksheet.write(index, 3, t - test_start_offset)
-            worksheet.write(index, 4, ref)
+            worksheet.write(index, 4, pos)
+            worksheet.write(index, 5, direction)
+            worksheet.write(index, 6, velocity_mm_s if direction else -velocity_mm_s)
         workbook.close()
 
         futek.stop()
