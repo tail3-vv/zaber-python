@@ -144,7 +144,7 @@ class MainWindow:
         # state = self.test_funct(n_runs, current_run, self.saved_path.get(), 
         #                         self.sensor_id.get(), self.zaber_comport.get())
         # state = self.run_tests(n_runs, current_run, self.zaber_comport.get())
-        state = self.run_sine_test(current_run, self.zaber_comport.get())
+        state = self.run_triangle_test(current_run, self.zaber_comport.get())
 
         # Check if run was paused or completed
         is_paused = current_run == state
@@ -683,22 +683,25 @@ class MainWindow:
             print("Subprocess took too long. Killing script")
             proc.kill()
 
-    def run_sine_test(self, current_run, zaber_comport, velocity_mm_s=0.7,
+    def run_triangle_test(self, current_run, zaber_comport, freq_hz=5.0,
                         lower_force_n=2.275, upper_force_n=3.575, cycle_count=25,
-                        sample_rate_hz=100.0):
+                        sample_rate_hz=100.0, max_velocity_mm_s=None):
         """
-        Constant-velocity bang-bang force tracking: drives the Zaber stage at a
-        fixed velocity_mm_s, reversing direction each time the FUTEK reading
-        crosses lower_force_n or upper_force_n. No depth calibration or
-        force->depth mapping is needed since direction is driven directly off
-        live force feedback. Produces a triangle-wave depth trajectory (not a
-        sine) - useful for isolating whether undershoot is a control-mode
-        artifact vs. a genuine actuator bandwidth limit. Sampled on an
-        absolute-time schedule (no time.sleep) at sample_rate_hz. Logs both
-        commanded force thresholds and actual position readback. Uses the
-        shared jlink handshake.
+        Calibration pass: press in slowly and record the actuator depth at
+        lower_force_n and upper_force_n (same single loading-curve calibration
+        as the sine test - no hysteresis correction). The resulting depth range
+        is used to back-calculate the constant velocity needed to complete one
+        full up+down triangle cycle at freq_hz:
+            v = 2 * (deep_depth - shallow_depth) * freq_hz
+        The stage then drives at that fixed velocity, reversing direction each
+        time the FUTEK reading crosses lower_force_n or upper_force_n (direct
+        force-threshold reversal - no depth->force mapping needed at runtime).
+        Sampled on an absolute-time schedule (no time.sleep) at sample_rate_hz.
+        Logs commanded/derived velocity, actual position readback, and force.
+        Uses the shared jlink handshake.
         """
         Extract = 12.75
+        calib_speed = 0.1  # mm/s, slow and deliberate
         sample_dt = 1.0 / sample_rate_hz
 
         zaber = ZaberCLI()
@@ -722,9 +725,69 @@ class MainWindow:
         if zaber.axis.is_parked():
             zaber.axis.unpark()
 
-        # establish a force zero-reference the same way the sine test does
-        init_force = futek.getNormalData() * (-4.44822)
+        # --- calibration press: find depth at lower_force_n and upper_force_n ---
+        zaber.axis.move_velocity(calib_speed, Units.VELOCITY_MILLIMETRES_PER_SECOND)
+
+        init_force = None
+        prev_stage = None
+        shallow_depth = None
+        deep_depth = None
+        cal_spike_threshold = (upper_force_n - lower_force_n) + 5.0
+
+        while True:
+            self.root.update()
+            f = futek.getNormalData() * (-4.44822)
+            if init_force is None:
+                init_force = f
+            stage = abs(f - init_force)
+
+            if prev_stage is not None and abs(stage - prev_stage) > cal_spike_threshold:
+                zaber.axis.stop()
+                self.error("Force spike during calibration - aborting triangle test")
+                self._stop_jlink_subprocess(proc)
+                futek.stop(); futek.exit(); zaber.disconnect()
+                return current_run
+            prev_stage = stage
+
+            depth = zaber.axis.get_position(Units.LENGTH_MILLIMETRES) - start_pos_mm
+            if shallow_depth is None and stage >= lower_force_n:
+                shallow_depth = depth
+            if stage >= upper_force_n:
+                deep_depth = depth
+                break
+
+        zaber.axis.stop()
+        zaber.axis.wait_until_idle()
+
+        if shallow_depth is None or deep_depth is None:
+            self.error("Calibration failed to reach both force bounds")
+            self._stop_jlink_subprocess(proc)
+            futek.stop(); futek.exit(); zaber.disconnect()
+            return current_run
+
         cal_init = init_force
+
+        # --- back-calculate velocity needed to hit freq_hz over this depth range ---
+        depth_range = abs(deep_depth - shallow_depth)
+        if depth_range <= 0:
+            self.error("Calibration produced zero depth range - cannot derive velocity")
+            self._stop_jlink_subprocess(proc)
+            futek.stop(); futek.exit(); zaber.disconnect()
+            return current_run
+
+        velocity_mm_s = 2.0 * depth_range * freq_hz
+
+        print(f"[triangle debug] calibrated depth_range={depth_range:.4f}mm, "
+            f"derived velocity={velocity_mm_s:.4f} mm/s for target {freq_hz} Hz")
+
+        # sanity check against the stage's rated envelope, if provided
+        if max_velocity_mm_s is not None and velocity_mm_s > max_velocity_mm_s:
+            self.error(f"Derived velocity {velocity_mm_s:.3f} mm/s exceeds stage max "
+                    f"{max_velocity_mm_s:.3f} mm/s for {freq_hz} Hz over {depth_range:.4f}mm - "
+                    f"aborting before driving the stage")
+            self._stop_jlink_subprocess(proc)
+            futek.stop(); futek.exit(); zaber.disconnect()
+            return current_run
 
         # --- drive in, find the lower threshold once to set the starting direction ---
         zaber.axis.move_velocity(velocity_mm_s, Units.VELOCITY_MILLIMETRES_PER_SECOND)
@@ -747,10 +810,10 @@ class MainWindow:
         zaber.axis.stop()
         zaber.axis.wait_until_idle()
 
-        # how long setup took, on the shared t0 clock
+        # how long setup + calibration took, on the shared t0 clock
         test_start_offset = datetime.now().timestamp() - t0
 
-        # --- bang-bang tracking loop ---
+        # --- bang-bang tracking loop at the derived velocity ---
         FORCE_CEILING_N = upper_force_n + 5.0
         total_reversals_needed = cycle_count * 2  # one full cycle = one up leg + one down leg
 
@@ -839,11 +902,13 @@ class MainWindow:
             print(f"[triangle debug] {missed_ticks} sample tick(s) missed their schedule "
                 f"(> {sample_dt*1000:.1f}ms late)")
 
-        # achieved frequency is an outcome now, not an input - log it for the write-up
+        # achieved frequency is an outcome even though we derived velocity from a
+        # target - actual material response / control lag can still make it drift
         if reversal_count > 0 and timestamps:
             total_duration = timestamps[-1] - timestamps[0]
             achieved_freq_hz = reversal_count / 2.0 / total_duration if total_duration > 0 else float('nan')
-            print(f"[triangle debug] achieved ~{achieved_freq_hz:.3f} Hz over {reversal_count} reversals")
+            print(f"[triangle debug] target={freq_hz:.3f}Hz, achieved ~{achieved_freq_hz:.3f} Hz "
+                f"over {reversal_count} reversals")
         else:
             achieved_freq_hz = float('nan')
 
@@ -858,8 +923,10 @@ class MainWindow:
         worksheet.write('D1', 'Time since test start (s)')      # 0-based at tracking start
         worksheet.write('E1', 'Actual Position (mm)')            # real Zaber readback, not commanded
         worksheet.write('F1', 'Direction (True=loading/up)')
-        worksheet.write('G1', f'Velocity Setpoint (mm/s) [+/-{velocity_mm_s}, {lower_force_n}-{upper_force_n}N]')
-        worksheet.write('H1', f'Achieved freq (Hz, avg): {achieved_freq_hz:.4f}')
+        worksheet.write('G1', f'Velocity Setpoint (mm/s) [+/-{velocity_mm_s:.4f}, {lower_force_n}-{upper_force_n}N]')
+        worksheet.write('H1', f'Target freq (Hz): {freq_hz}')
+        worksheet.write('I1', f'Achieved freq (Hz, avg): {achieved_freq_hz:.4f}')
+        worksheet.write('J1', f'Calibrated depth range (mm): {depth_range:.4f}')
         for index, (force, t, pos, direction) in enumerate(
             zip(force_readings, timestamps, position_readings, direction_flags), start=1
         ):
