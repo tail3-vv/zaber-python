@@ -913,6 +913,7 @@ class MainWindow:
             worksheet.write('H1', f'Target freq (Hz): {freq_hz}')
             worksheet.write('I1', f'Achieved freq (Hz, avg): {achieved_freq_hz:.4f}')
             worksheet.write('J1', f'Calibrated depth range (mm): {depth_range:.4f}')
+            worksheet.write('K1', f'Test start offset (s): {test_start_offset:.4f}')
             for index, (force, t, pos, direction) in enumerate(
                 zip(force_readings, timestamps, position_readings, direction_flags), start=1
             ):

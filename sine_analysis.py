@@ -243,15 +243,17 @@ def sampling_summary(file_name: str, t: np.ndarray, expected_freq_hz: float):
 
 
 def read_triangle_metadata(force_path: Path):
-    """Read back the single-cell metadata run_triangle_test writes to H1/I1/J1
-    of the Force xlsx: target freq, reversal-derived achieved freq, and the
-    calibrated depth range. These are plain strings in a single cell each
-    (not per-row columns), so pandas' normal column parsing won't line them
-    up with data rows - read them directly off row 0 by position instead.
+    """Read back the single-cell metadata run_triangle_test writes to H1/I1/J1/K1
+    of the Force xlsx: target freq, reversal-derived achieved freq, calibrated
+    depth range, and test start offset (how far into the shared t0 clock the
+    real tracking loop began - i.e. how much calibration/approach time preceded
+    it). These are plain strings in a single cell each (not per-row columns),
+    so pandas' normal column parsing won't line them up with data rows - read
+    them directly off row 0 by position instead.
 
     Returns a dict with any of target_freq_hz / test_reported_achieved_freq_hz /
-    calibrated_depth_range_mm that could be parsed, or an empty dict if the
-    file doesn't have this triangle-test metadata layout.
+    calibrated_depth_range_mm / test_start_offset_s that could be parsed, or an
+    empty dict if the file doesn't have this triangle-test metadata layout.
     """
     try:
         raw = pd.read_excel(force_path, header=None, nrows=1)
@@ -263,6 +265,7 @@ def read_triangle_metadata(force_path: Path):
         "target_freq_hz": (7, r"Target freq \(Hz\):\s*([-\d.eE]+)"),
         "test_reported_achieved_freq_hz": (8, r"Achieved freq \(Hz, avg\):\s*([-\d.eE]+)"),
         "calibrated_depth_range_mm": (9, r"Calibrated depth range \(mm\):\s*([-\d.eE]+)"),
+        "test_start_offset_s": (10, r"Test start offset \(s\):\s*([-\d.eE]+)"),
     }
     for key, (col_idx, pattern) in patterns.items():
         if col_idx >= raw.shape[1]:
@@ -277,6 +280,16 @@ def read_triangle_metadata(force_path: Path):
             except ValueError:
                 pass
     return meta
+
+
+def extract_run_id(file_name: str):
+    """Pulls a run number out of a filename like 'Run 7 triangle.xlsx' or
+    'Run7_CAP.xlsx' so a Force file and its corresponding CAP file (same run,
+    different naming suffix) can be matched up. Returns an int, or None if no
+    'run <number>' pattern is found.
+    """
+    m = re.search(r"run\s*(\d+)", file_name, re.IGNORECASE)
+    return int(m.group(1)) if m else None
 
 
 def _mark_peaks_on_ax(ax, peak_times: np.ndarray, trough_times: np.ndarray,
@@ -399,12 +412,12 @@ def plot_force(force_path: Path, out_dir: Path, default_expected_freq_hz: float,
     plt.close(fig)
     print(f"  Saved: {out_path}")
 
-    return freq_rows
+    return freq_rows, metadata
 
 
 def plot_caps(cap_path: Path, out_dir: Path, expected_freq_hz: float,
               cycle_records: dict, sampling_rows: list,
-              spline_s: float = None):
+              spline_s: float = None, trim_start_time: float = None):
     df = pd.read_excel(cap_path)
 
     time_col = find_column(df.columns, "time")
@@ -418,6 +431,16 @@ def plot_caps(cap_path: Path, out_dir: Path, expected_freq_hz: float,
     if not cap_cols:
         print(f"  No CAP columns found in {cap_path.name}: {list(df.columns)}")
         return []
+
+    if trim_start_time is not None:
+        n_before = len(df)
+        df = df[df[time_col] >= trim_start_time].reset_index(drop=True)
+        n_after = len(df)
+        print(f"  [align] trimmed {cap_path.name} to t >= {trim_start_time:.3f}s "
+              f"({n_before - n_after} of {n_before} samples dropped, matching Force test start)")
+        if len(df) < 2:
+            print(f"  [align] trim left too few samples in {cap_path.name} - skipping")
+            return []
 
     t = df[time_col].to_numpy(dtype=float)
     sampling_rows.append(sampling_summary(cap_path.name, t, expected_freq_hz))
@@ -466,7 +489,8 @@ def plot_caps(cap_path: Path, out_dir: Path, expected_freq_hz: float,
             ax.set_xlabel(time_col)
 
     spline_note = f" | spline s={spline_s:.0f}" if spline_s is not None else ""
-    fig.suptitle(f"CAP channels vs Time — {cap_path.name}{spline_note}")
+    trim_note = f" | trimmed to t>={trim_start_time:.2f}s (aligned to Force)" if trim_start_time is not None else ""
+    fig.suptitle(f"CAP channels vs Time — {cap_path.name}{spline_note}{trim_note}")
     fig.tight_layout(rect=[0, 0, 1, 0.97])
 
     out_path = out_dir / f"{cap_path.stem}_cap_vs_time.png"
@@ -573,12 +597,27 @@ def main():
         cap_spline_s = s_val
         print(f"  CAP spline smoothing enabled: s = {cap_spline_s:.0f}")
 
+    align_cap = False
+    if force_folder is not None and cap_folder is not None:
+        align_input = input(
+            "\nTrim CAP files to align with each Force run's tracking-loop start?\n"
+            "(CAP logs from jlink launch, which includes calibration/approach time "
+            "before the real up/down test begins; Force only logs the tracking loop "
+            "itself. This uses each run's 'Test start offset' metadata to cut that "
+            "lead-in off the CAP file so both start at the same point.) [y/N]: "
+        ).strip().lower()
+        align_cap = align_input in ("y", "yes")
+        if align_cap:
+            print("  Alignment enabled — matching Force and CAP files by 'Run <N>' in "
+                  "the filename.")
+
     out_dir = Path("./triangle_analysis_output")
     out_dir.mkdir(exist_ok=True)
 
     freq_rows     = []
     sampling_rows = []
     cycle_records = {"period": defaultdict(list), "amplitude": defaultdict(list)}
+    run_offsets   = {}  # run_id -> test_start_offset_s, built from Force metadata
 
     if force_folder is not None:
         force_files = list_xlsx_files(force_folder)
@@ -586,8 +625,16 @@ def main():
             print(f"  No xlsx files found in {force_folder}")
         for f in force_files:
             print(f"Processing {f.name}...")
-            freq_rows.extend(plot_force(f, out_dir, default_expected_freq_hz, cycle_records,
-                                         sampling_rows, spline_s=force_spline_s))
+            rows, metadata = plot_force(f, out_dir, default_expected_freq_hz, cycle_records,
+                                         sampling_rows, spline_s=force_spline_s)
+            freq_rows.extend(rows)
+            if align_cap and "test_start_offset_s" in metadata:
+                run_id = extract_run_id(f.name)
+                if run_id is not None:
+                    run_offsets[run_id] = metadata["test_start_offset_s"]
+                else:
+                    print(f"  [align] could not find a run number in '{f.name}' - "
+                          "this run's CAP file won't be auto-trimmed")
 
     if cap_folder is not None:
         cap_files = list_xlsx_files(cap_folder)
@@ -595,8 +642,17 @@ def main():
             print(f"  No xlsx files found in {cap_folder}")
         for f in cap_files:
             print(f"Processing {f.name}...")
+            trim_start_time = None
+            if align_cap:
+                run_id = extract_run_id(f.name)
+                if run_id is not None and run_id in run_offsets:
+                    trim_start_time = run_offsets[run_id]
+                else:
+                    print(f"  [align] no matching Force test_start_offset found for "
+                          f"'{f.name}' (run_id={run_id}) - plotting untrimmed")
             freq_rows.extend(plot_caps(f, out_dir, default_expected_freq_hz, cycle_records,
-                                        sampling_rows, spline_s=cap_spline_s))
+                                        sampling_rows, spline_s=cap_spline_s,
+                                        trim_start_time=trim_start_time))
 
     if sampling_rows:
         sampling_path = out_dir / "sampling_summary.csv"
