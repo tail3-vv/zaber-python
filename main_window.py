@@ -683,266 +683,335 @@ class MainWindow:
             print("Subprocess took too long. Killing script")
             proc.kill()
 
-    def run_triangle_test(self, current_run, zaber_comport, freq_hz=5.0,
-                        lower_force_n=2.275, upper_force_n=3.575, cycle_count=25,
-                        sample_rate_hz=100.0, max_velocity_mm_s=None):
-        """
-        Calibration pass: press in slowly and record the actuator depth at
-        lower_force_n and upper_force_n (same single loading-curve calibration
-        as the sine test - no hysteresis correction). The resulting depth range
-        is used to back-calculate the constant velocity needed to complete one
-        full up+down triangle cycle at freq_hz:
-            v = 2 * (deep_depth - shallow_depth) * freq_hz
-        The stage then drives at that fixed velocity, reversing direction each
-        time the FUTEK reading crosses lower_force_n or upper_force_n (direct
-        force-threshold reversal - no depth->force mapping needed at runtime).
-        Sampled on an absolute-time schedule (no time.sleep) at sample_rate_hz.
-        Logs commanded/derived velocity, actual position readback, and force.
-        Uses the shared jlink handshake.
-        """
-        Extract = 12.75
-        calib_speed = 0.1  # mm/s, slow and deliberate
-        sample_dt = 1.0 / sample_rate_hz
+    def run_triangle_test(self, current_run, zaber_comport, freq_hz=0.25,
+                            lower_force_n=2.275, upper_force_n=3.575, cycle_count=25,
+                            sample_rate_hz=100.0, max_velocity_mm_s=0.7):
+            """
+            Calibration pass: press in slowly and record the actuator depth at
+            lower_force_n and upper_force_n (same single loading-curve calibration
+            as the sine test - no hysteresis correction). The resulting depth range
+            is used to back-calculate the constant velocity needed to complete one
+            full up+down triangle cycle at freq_hz:
+                v = 2 * (deep_depth - shallow_depth) * freq_hz
+            The stage then drives at that fixed velocity, reversing direction each
+            time the FUTEK reading crosses lower_force_n or upper_force_n (direct
+            force-threshold reversal - no depth->force mapping needed at runtime).
+            Sampled on an absolute-time schedule (no time.sleep) at sample_rate_hz.
+            Logs commanded/derived velocity, actual position readback, and force.
+            Uses the shared jlink handshake.
+            """
+            Extract = 12.75
+            calib_speed = 0.1  # mm/s, slow and deliberate
+            sample_dt = 1.0 / sample_rate_hz
 
-        zaber = ZaberCLI()
-        connection = zaber.connect(comport=zaber_comport)
-        if connection == 0:
-            print("Cannot Connect to Zaber comport")
-            self.error("Cannot Connect to Zaber comport")
-            return
+            print(f"[triangle debug] === STARTING triangle test, run {current_run}, "
+                f"target freq={freq_hz}Hz, force range={lower_force_n}-{upper_force_n}N, "
+                f"cycle_count={cycle_count}, sample_rate_hz={sample_rate_hz}, "
+                f"max_velocity_mm_s={max_velocity_mm_s} ===")
 
-        futek = FUTEKDeviceCLI()
+            zaber = ZaberCLI()
+            connection = zaber.connect(comport=zaber_comport)
+            if connection == 0:
+                print("Cannot Connect to Zaber comport")
+                self.error("Cannot Connect to Zaber comport")
+                return
 
-        proc, t0 = self._launch_jlink_and_sync(current_run)
-        if proc is None:
-            zaber.disconnect()
-            return current_run
+            print("[triangle debug] stage: Zaber connected")
 
-        # approach the sensor, same as the threshold test
-        zaber.axis.move_relative((Extract - 1.8), Units.LENGTH_MILLIMETRES)
-        start_pos_mm = zaber.axis.get_position(Units.LENGTH_MILLIMETRES)
+            futek = FUTEKDeviceCLI()
+            print("[triangle debug] stage: FUTEK device object created")
 
-        if zaber.axis.is_parked():
-            zaber.axis.unpark()
+            proc, t0 = self._launch_jlink_and_sync(current_run)
+            if proc is None:
+                print("[triangle debug] ABORT: jlink launch/sync failed (proc is None)")
+                zaber.disconnect()
+                return current_run
 
-        # --- calibration press: find depth at lower_force_n and upper_force_n ---
-        zaber.axis.move_velocity(calib_speed, Units.VELOCITY_MILLIMETRES_PER_SECOND)
+            print(f"[triangle debug] stage: jlink launched and synced, t0={t0:.3f}")
 
-        init_force = None
-        prev_stage = None
-        shallow_depth = None
-        deep_depth = None
-        cal_spike_threshold = (upper_force_n - lower_force_n) + 5.0
+            print("[triangle debug] stage: approaching sensor")
+            # approach the sensor, same as the threshold test
+            zaber.axis.move_relative((Extract - 1.8), Units.LENGTH_MILLIMETRES)
+            start_pos_mm = zaber.axis.get_position(Units.LENGTH_MILLIMETRES)
+            print(f"[triangle debug] stage: approach complete, start_pos_mm={start_pos_mm:.4f}")
 
-        while True:
-            self.root.update()
-            f = futek.getNormalData() * (-4.44822)
-            if init_force is None:
-                init_force = f
-            stage = abs(f - init_force)
+            if zaber.axis.is_parked():
+                print("[triangle debug] stage: axis was parked, unparking")
+                zaber.axis.unpark()
 
-            if prev_stage is not None and abs(stage - prev_stage) > cal_spike_threshold:
-                zaber.axis.stop()
-                self.error("Force spike during calibration - aborting triangle test")
+            # --- calibration press: find depth at lower_force_n and upper_force_n ---
+            print(f"[triangle debug] stage: calibration press starting at {calib_speed} mm/s")
+            zaber.axis.move_velocity(calib_speed, Units.VELOCITY_MILLIMETRES_PER_SECOND)
+
+            init_force = None
+            prev_stage = None
+            shallow_depth = None
+            deep_depth = None
+            cal_spike_threshold = (upper_force_n - lower_force_n) + 5.0
+            cal_tick = 0
+
+            while True:
+                self.root.update()
+                f = futek.getNormalData() * (-4.44822)
+                if init_force is None:
+                    init_force = f
+                    print(f"[triangle debug] cal: init_force={init_force:.3f}N")
+                stage = abs(f - init_force)
+
+                if cal_tick % 20 == 0:
+                    depth_now = zaber.axis.get_position(Units.LENGTH_MILLIMETRES) - start_pos_mm
+                    print(f"[triangle debug] cal: raw_f={f:.3f}N stage={stage:.3f}N "
+                        f"depth={depth_now:.4f}mm shallow_found={shallow_depth is not None}")
+                cal_tick += 1
+
+                if prev_stage is not None and abs(stage - prev_stage) > cal_spike_threshold:
+                    zaber.axis.stop()
+                    print(f"[triangle debug] ABORT: calibration spike, stage={stage:.3f}N "
+                        f"prev_stage={prev_stage:.3f}N threshold={cal_spike_threshold:.3f}N")
+                    self.error("Force spike during calibration - aborting triangle test")
+                    self._stop_jlink_subprocess(proc)
+                    futek.stop(); futek.exit(); zaber.disconnect()
+                    return current_run
+                prev_stage = stage
+
+                depth = zaber.axis.get_position(Units.LENGTH_MILLIMETRES) - start_pos_mm
+                if shallow_depth is None and stage >= lower_force_n:
+                    shallow_depth = depth
+                    print(f"[triangle debug] cal: shallow_depth found = {shallow_depth:.4f}mm "
+                        f"at stage={stage:.3f}N")
+                if stage >= upper_force_n:
+                    deep_depth = depth
+                    print(f"[triangle debug] cal: deep_depth found = {deep_depth:.4f}mm "
+                        f"at stage={stage:.3f}N")
+                    break
+
+            zaber.axis.stop()
+            zaber.axis.wait_until_idle()
+            print("[triangle debug] stage: calibration press complete, stage stopped")
+
+            if shallow_depth is None or deep_depth is None:
+                print("[triangle debug] ABORT: calibration failed to reach both force bounds "
+                    f"(shallow_depth={shallow_depth}, deep_depth={deep_depth})")
+                self.error("Calibration failed to reach both force bounds")
                 self._stop_jlink_subprocess(proc)
                 futek.stop(); futek.exit(); zaber.disconnect()
                 return current_run
-            prev_stage = stage
 
-            depth = zaber.axis.get_position(Units.LENGTH_MILLIMETRES) - start_pos_mm
-            if shallow_depth is None and stage >= lower_force_n:
-                shallow_depth = depth
-            if stage >= upper_force_n:
-                deep_depth = depth
-                break
+            cal_init = init_force
 
-        zaber.axis.stop()
-        zaber.axis.wait_until_idle()
-
-        if shallow_depth is None or deep_depth is None:
-            self.error("Calibration failed to reach both force bounds")
-            self._stop_jlink_subprocess(proc)
-            futek.stop(); futek.exit(); zaber.disconnect()
-            return current_run
-
-        cal_init = init_force
-
-        # --- back-calculate velocity needed to hit freq_hz over this depth range ---
-        depth_range = abs(deep_depth - shallow_depth)
-        if depth_range <= 0:
-            self.error("Calibration produced zero depth range - cannot derive velocity")
-            self._stop_jlink_subprocess(proc)
-            futek.stop(); futek.exit(); zaber.disconnect()
-            return current_run
-
-        velocity_mm_s = 2.0 * depth_range * freq_hz
-
-        print(f"[triangle debug] calibrated depth_range={depth_range:.4f}mm, "
-            f"derived velocity={velocity_mm_s:.4f} mm/s for target {freq_hz} Hz")
-
-        # sanity check against the stage's rated envelope, if provided
-        if max_velocity_mm_s is not None and velocity_mm_s > max_velocity_mm_s:
-            self.error(f"Derived velocity {velocity_mm_s:.3f} mm/s exceeds stage max "
-                    f"{max_velocity_mm_s:.3f} mm/s for {freq_hz} Hz over {depth_range:.4f}mm - "
-                    f"aborting before driving the stage")
-            self._stop_jlink_subprocess(proc)
-            futek.stop(); futek.exit(); zaber.disconnect()
-            return current_run
-
-        # --- drive in, find the lower threshold once to set the starting direction ---
-        zaber.axis.move_velocity(velocity_mm_s, Units.VELOCITY_MILLIMETRES_PER_SECOND)
-        spike_threshold = (upper_force_n - lower_force_n) + 5.0
-        prev_force = None
-
-        while True:
-            self.root.update()
-            f = futek.getNormalData() * (-4.44822) - cal_init
-            if prev_force is not None and abs(f - prev_force) > spike_threshold:
-                zaber.axis.stop()
-                self.error("Force spike while approaching lower threshold - aborting test")
+            # --- back-calculate velocity needed to hit freq_hz over this depth range ---
+            depth_range = abs(deep_depth - shallow_depth)
+            if depth_range <= 0:
+                print("[triangle debug] ABORT: depth_range <= 0, cannot derive velocity")
+                self.error("Calibration produced zero depth range - cannot derive velocity")
                 self._stop_jlink_subprocess(proc)
                 futek.stop(); futek.exit(); zaber.disconnect()
                 return current_run
-            prev_force = f
-            if f >= lower_force_n:
-                break
 
-        zaber.axis.stop()
-        zaber.axis.wait_until_idle()
+            velocity_mm_s = 2.0 * depth_range * freq_hz
 
-        # how long setup + calibration took, on the shared t0 clock
-        test_start_offset = datetime.now().timestamp() - t0
+            print(f"[triangle debug] calibrated depth_range={depth_range:.4f}mm, "
+                f"derived velocity={velocity_mm_s:.4f} mm/s for target {freq_hz} Hz")
 
-        # --- bang-bang tracking loop at the derived velocity ---
-        FORCE_CEILING_N = upper_force_n + 5.0
-        total_reversals_needed = cycle_count * 2  # one full cycle = one up leg + one down leg
+            # sanity check against the stage's rated envelope, if provided
+            if max_velocity_mm_s is not None and velocity_mm_s > max_velocity_mm_s:
+                print(f"[triangle debug] ABORT: velocity {velocity_mm_s:.3f} mm/s exceeds "
+                    f"max_velocity_mm_s={max_velocity_mm_s:.3f} - stopping here")
+                self.error(f"Derived velocity {velocity_mm_s:.3f} mm/s exceeds stage max "
+                        f"{max_velocity_mm_s:.3f} mm/s for {freq_hz} Hz over {depth_range:.4f}mm - "
+                        f"aborting before driving the stage")
+                self._stop_jlink_subprocess(proc)
+                futek.stop(); futek.exit(); zaber.disconnect()
+                return current_run
 
-        force_readings = []
-        timestamps = []
-        position_readings = []      # actual Zaber position readback each tick
-        direction_flags = []        # True = driving toward upper_force_n, False = toward lower
-        missed_ticks = 0
-        prev_force = None
-        tripped = False
-        reversal_count = 0
-        loading = True  # we just arrived at lower threshold, now driving up
+            print(f"[triangle debug] max_velocity_mm_s={max_velocity_mm_s} -> sanity check passed")
 
-        zaber.axis.move_velocity(velocity_mm_s, Units.VELOCITY_MILLIMETRES_PER_SECOND)
+            # --- drive in, find the lower threshold once to set the starting direction ---
+            print(f"[triangle debug] stage: driving to find lower threshold "
+                f"({lower_force_n}N) at {velocity_mm_s:.4f} mm/s")
+            zaber.axis.move_velocity(velocity_mm_s, Units.VELOCITY_MILLIMETRES_PER_SECOND)
+            spike_threshold = (upper_force_n - lower_force_n) + 5.0
+            prev_force = None
+            lt_tick = 0
 
-        loop_start = time.time()
-        next_tick = loop_start
-        sample_idx = 0
+            while True:
+                self.root.update()
+                f = futek.getNormalData() * (-4.44822) - cal_init
 
-        while True:
-            if self.toggle_pause.get() == 1:
-                self.warning("Pausing mid-cycle isn't supported; stopping this run.")
-                zaber.axis.stop()
-                self.toggle_pause.set(0)
-                break
-            self.root.update()
+                if lt_tick % 20 == 0:
+                    print(f"[triangle debug] lower-thresh search: f={f:.3f}N "
+                        f"(target >= {lower_force_n}N)")
+                lt_tick += 1
 
-            now = time.time()
-            if now < next_tick:
-                continue  # spin until next scheduled sample, stay GUI-responsive
+                if prev_force is not None and abs(f - prev_force) > spike_threshold:
+                    zaber.axis.stop()
+                    print(f"[triangle debug] ABORT: spike while approaching lower threshold, "
+                        f"f={f:.3f}N prev_force={prev_force:.3f}N threshold={spike_threshold:.3f}N")
+                    self.error("Force spike while approaching lower threshold - aborting test")
+                    self._stop_jlink_subprocess(proc)
+                    futek.stop(); futek.exit(); zaber.disconnect()
+                    return current_run
+                prev_force = f
+                if f >= lower_force_n:
+                    print(f"[triangle debug] lower-thresh search: reached f={f:.3f}N, breaking")
+                    break
 
-            if reversal_count >= total_reversals_needed:
-                break
+            zaber.axis.stop()
+            zaber.axis.wait_until_idle()
+            print("[triangle debug] stage: lower threshold reached, stage stopped, "
+                "about to enter bang-bang tracking loop")
 
-            if now - next_tick > sample_dt:
-                missed_ticks += 1
+            # how long setup + calibration took, on the shared t0 clock
+            test_start_offset = datetime.now().timestamp() - t0
 
-            t_elapsed = now - loop_start
-            reading_force = futek.getNormalData() * (-4.44822) - cal_init
-            actual_pos = zaber.axis.get_position(Units.LENGTH_MILLIMETRES) - start_pos_mm
+            # --- bang-bang tracking loop at the derived velocity ---
+            FORCE_CEILING_N = upper_force_n + 5.0
+            total_reversals_needed = cycle_count * 2  # one full cycle = one up leg + one down leg
 
-            if sample_idx % 10 == 0:
-                print(f"[triangle debug] t={t_elapsed:.3f}s force={reading_force:.2f}N "
-                    f"pos={actual_pos:.4f}mm {'up' if loading else 'down'} "
-                    f"rev={reversal_count}/{total_reversals_needed}")
+            force_readings = []
+            timestamps = []
+            position_readings = []      # actual Zaber position readback each tick
+            direction_flags = []        # True = driving toward upper_force_n, False = toward lower
+            missed_ticks = 0
+            prev_force = None
+            tripped = False
+            reversal_count = 0
+            loading = True  # we just arrived at lower threshold, now driving up
 
-            # Safety: hard ceiling, or an implausible jump between samples
-            if reading_force > FORCE_CEILING_N or (
-                prev_force is not None and abs(reading_force - prev_force) > spike_threshold
+            zaber.axis.move_velocity(velocity_mm_s, Units.VELOCITY_MILLIMETRES_PER_SECOND)
+            print(f"[triangle debug] stage: bang-bang tracking loop STARTED "
+                f"(need {total_reversals_needed} reversals for {cycle_count} cycles)")
+
+            loop_start = time.time()
+            next_tick = loop_start
+            sample_idx = 0
+
+            while True:
+                if self.toggle_pause.get() == 1:
+                    self.warning("Pausing mid-cycle isn't supported; stopping this run.")
+                    print("[triangle debug] stage: pause requested mid-cycle, stopping run")
+                    zaber.axis.stop()
+                    self.toggle_pause.set(0)
+                    break
+                self.root.update()
+
+                now = time.time()
+                if now < next_tick:
+                    continue  # spin until next scheduled sample, stay GUI-responsive
+
+                if reversal_count >= total_reversals_needed:
+                    print(f"[triangle debug] stage: reached {reversal_count} reversals, "
+                        "tracking loop complete")
+                    break
+
+                if now - next_tick > sample_dt:
+                    missed_ticks += 1
+
+                t_elapsed = now - loop_start
+                reading_force = futek.getNormalData() * (-4.44822) - cal_init
+                actual_pos = zaber.axis.get_position(Units.LENGTH_MILLIMETRES) - start_pos_mm
+
+                if sample_idx % 10 == 0:
+                    print(f"[triangle debug] t={t_elapsed:.3f}s force={reading_force:.2f}N "
+                        f"pos={actual_pos:.4f}mm {'up' if loading else 'down'} "
+                        f"rev={reversal_count}/{total_reversals_needed}")
+
+                # Safety: hard ceiling, or an implausible jump between samples
+                if reading_force > FORCE_CEILING_N or (
+                    prev_force is not None and abs(reading_force - prev_force) > spike_threshold
+                ):
+                    zaber.axis.stop()
+                    print(f"[triangle debug] ABORT: safety trip in tracking loop, "
+                        f"reading_force={reading_force:.2f}N ceiling={FORCE_CEILING_N:.2f}N "
+                        f"prev_force={prev_force}")
+                    self.error(f"Force exceeded safety ceiling ({reading_force:.2f} N) - triangle test stopped")
+                    tripped = True
+                    break
+                prev_force = reading_force
+
+                # reversal logic: driven directly by live force feedback
+                if loading and reading_force >= upper_force_n:
+                    zaber.axis.move_velocity(-velocity_mm_s, Units.VELOCITY_MILLIMETRES_PER_SECOND)
+                    loading = False
+                    reversal_count += 1
+                    print(f"[triangle debug] REVERSAL #{reversal_count}: hit upper "
+                        f"({reading_force:.2f}N >= {upper_force_n}N), now driving down")
+                elif (not loading) and reading_force <= lower_force_n:
+                    zaber.axis.move_velocity(velocity_mm_s, Units.VELOCITY_MILLIMETRES_PER_SECOND)
+                    loading = True
+                    reversal_count += 1
+                    print(f"[triangle debug] REVERSAL #{reversal_count}: hit lower "
+                        f"({reading_force:.2f}N <= {lower_force_n}N), now driving up")
+
+                force_readings.append(reading_force)
+                timestamps.append(datetime.now().timestamp() - t0)
+                position_readings.append(actual_pos)
+                direction_flags.append(loading)
+
+                sample_idx += 1
+                next_tick += sample_dt
+
+            zaber.axis.stop()
+            zaber.axis.wait_until_idle()
+            zaber.axis.move_absolute(17, Units.LENGTH_MILLIMETRES)
+            print("[triangle debug] stage: retracted to 17mm absolute position")
+
+            self._stop_jlink_subprocess(proc)
+
+            if tripped:
+                print("[triangle debug] run discarded due to safety trip, not saving file")
+                futek.stop(); futek.exit(); zaber.disconnect()
+                return current_run  # discard run, don't save/increment on a safety abort
+
+            if missed_ticks:
+                print(f"[triangle debug] {missed_ticks} sample tick(s) missed their schedule "
+                    f"(> {sample_dt*1000:.1f}ms late)")
+
+            # achieved frequency is an outcome even though we derived velocity from a
+            # target - actual material response / control lag can still make it drift
+            if reversal_count > 0 and timestamps:
+                total_duration = timestamps[-1] - timestamps[0]
+                achieved_freq_hz = reversal_count / 2.0 / total_duration if total_duration > 0 else float('nan')
+                print(f"[triangle debug] target={freq_hz:.3f}Hz, achieved ~{achieved_freq_hz:.3f} Hz "
+                    f"over {reversal_count} reversals")
+            else:
+                achieved_freq_hz = float('nan')
+
+            print(f"[triangle debug] stage: writing output file for run {current_run}")
+
+            path = Path(self.saved_path.get())
+            file_name = f"Run {current_run} triangle.xlsx"
+            path = path / file_name
+            workbook = xlsxwriter.Workbook(path)
+            worksheet = workbook.add_worksheet(str(current_run))
+            worksheet.write('A1', 'Index')
+            worksheet.write('B1', 'Load Cell - Actual (N)')
+            worksheet.write('C1', 'Time (s)')                       # shared t0 clock — aligns with CAP file
+            worksheet.write('D1', 'Time since test start (s)')      # 0-based at tracking start
+            worksheet.write('E1', 'Actual Position (mm)')            # real Zaber readback, not commanded
+            worksheet.write('F1', 'Direction (True=loading/up)')
+            worksheet.write('G1', f'Velocity Setpoint (mm/s) [+/-{velocity_mm_s:.4f}, {lower_force_n}-{upper_force_n}N]')
+            worksheet.write('H1', f'Target freq (Hz): {freq_hz}')
+            worksheet.write('I1', f'Achieved freq (Hz, avg): {achieved_freq_hz:.4f}')
+            worksheet.write('J1', f'Calibrated depth range (mm): {depth_range:.4f}')
+            for index, (force, t, pos, direction) in enumerate(
+                zip(force_readings, timestamps, position_readings, direction_flags), start=1
             ):
-                zaber.axis.stop()
-                self.error(f"Force exceeded safety ceiling ({reading_force:.2f} N) - triangle test stopped")
-                tripped = True
-                break
-            prev_force = reading_force
+                worksheet.write(index, 0, index)
+                worksheet.write(index, 1, force)
+                worksheet.write(index, 2, t)
+                worksheet.write(index, 3, t - test_start_offset)
+                worksheet.write(index, 4, pos)
+                worksheet.write(index, 5, direction)
+                worksheet.write(index, 6, velocity_mm_s if direction else -velocity_mm_s)
+            workbook.close()
 
-            # reversal logic: driven directly by live force feedback
-            if loading and reading_force >= upper_force_n:
-                zaber.axis.move_velocity(-velocity_mm_s, Units.VELOCITY_MILLIMETRES_PER_SECOND)
-                loading = False
-                reversal_count += 1
-            elif (not loading) and reading_force <= lower_force_n:
-                zaber.axis.move_velocity(velocity_mm_s, Units.VELOCITY_MILLIMETRES_PER_SECOND)
-                loading = True
-                reversal_count += 1
+            print(f"[triangle debug] stage: file written to {path}, run complete")
 
-            force_readings.append(reading_force)
-            timestamps.append(datetime.now().timestamp() - t0)
-            position_readings.append(actual_pos)
-            direction_flags.append(loading)
-
-            sample_idx += 1
-            next_tick += sample_dt
-
-        zaber.axis.stop()
-        zaber.axis.wait_until_idle()
-        zaber.axis.move_absolute(17, Units.LENGTH_MILLIMETRES)
-
-        self._stop_jlink_subprocess(proc)
-
-        if tripped:
-            futek.stop(); futek.exit(); zaber.disconnect()
-            return current_run  # discard run, don't save/increment on a safety abort
-
-        if missed_ticks:
-            print(f"[triangle debug] {missed_ticks} sample tick(s) missed their schedule "
-                f"(> {sample_dt*1000:.1f}ms late)")
-
-        # achieved frequency is an outcome even though we derived velocity from a
-        # target - actual material response / control lag can still make it drift
-        if reversal_count > 0 and timestamps:
-            total_duration = timestamps[-1] - timestamps[0]
-            achieved_freq_hz = reversal_count / 2.0 / total_duration if total_duration > 0 else float('nan')
-            print(f"[triangle debug] target={freq_hz:.3f}Hz, achieved ~{achieved_freq_hz:.3f} Hz "
-                f"over {reversal_count} reversals")
-        else:
-            achieved_freq_hz = float('nan')
-
-        path = Path(self.saved_path.get())
-        file_name = f"Run {current_run} triangle.xlsx"
-        path = path / file_name
-        workbook = xlsxwriter.Workbook(path)
-        worksheet = workbook.add_worksheet(str(current_run))
-        worksheet.write('A1', 'Index')
-        worksheet.write('B1', 'Load Cell - Actual (N)')
-        worksheet.write('C1', 'Time (s)')                       # shared t0 clock — aligns with CAP file
-        worksheet.write('D1', 'Time since test start (s)')      # 0-based at tracking start
-        worksheet.write('E1', 'Actual Position (mm)')            # real Zaber readback, not commanded
-        worksheet.write('F1', 'Direction (True=loading/up)')
-        worksheet.write('G1', f'Velocity Setpoint (mm/s) [+/-{velocity_mm_s:.4f}, {lower_force_n}-{upper_force_n}N]')
-        worksheet.write('H1', f'Target freq (Hz): {freq_hz}')
-        worksheet.write('I1', f'Achieved freq (Hz, avg): {achieved_freq_hz:.4f}')
-        worksheet.write('J1', f'Calibrated depth range (mm): {depth_range:.4f}')
-        for index, (force, t, pos, direction) in enumerate(
-            zip(force_readings, timestamps, position_readings, direction_flags), start=1
-        ):
-            worksheet.write(index, 0, index)
-            worksheet.write(index, 1, force)
-            worksheet.write(index, 2, t)
-            worksheet.write(index, 3, t - test_start_offset)
-            worksheet.write(index, 4, pos)
-            worksheet.write(index, 5, direction)
-            worksheet.write(index, 6, velocity_mm_s if direction else -velocity_mm_s)
-        workbook.close()
-
-        futek.stop()
-        futek.exit()
-        zaber.disconnect()
-        return int(current_run) + 1
+            futek.stop()
+            futek.exit()
+            zaber.disconnect()
+            return int(current_run) + 1
 
     def _create_widgets(self):
         self.display_updates()
